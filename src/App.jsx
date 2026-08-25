@@ -2861,7 +2861,7 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
           </button>
 
           {/* Séance */}
-          <button onClick={onSeance} style={{background:`linear-gradient(135deg,#064e3b,${C.green})`,border:"none",borderRadius:18,padding:"20px 16px",cursor:"pointer",textAlign:"left",position:"relative",overflow:"hidden",boxShadow:`0 8px 24px rgba(5,150,105,0.3)`}}>
+          <button onClick={()=>onSeance(null)} style={{background:`linear-gradient(135deg,#064e3b,${C.green})`,border:"none",borderRadius:18,padding:"20px 16px",cursor:"pointer",textAlign:"left",position:"relative",overflow:"hidden",boxShadow:`0 8px 24px rgba(5,150,105,0.3)`}}>
             <div style={{position:"absolute",top:-15,right:-15,width:70,height:70,borderRadius:"50%",background:"rgba(255,255,255,0.06)"}}/>
             <div style={{fontSize:28,marginBottom:8}}>⚡</div>
             <div style={{fontSize:13,fontWeight:800,color:"#fff",marginBottom:3,letterSpacing:"-0.3px"}}>Séance du jour</div>
