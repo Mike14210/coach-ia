@@ -2775,6 +2775,7 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans apostrophes dans les val
     </div>
   );
 }
+}
 
 
 // ─── HOME SCREEN ─────────────────────────────────────────────────────────────
