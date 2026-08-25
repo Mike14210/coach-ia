@@ -885,7 +885,7 @@ function HIITPanel({token, profile, firstName, onClose}) {
 
   const parseExSecs = (s) => {
     if (!s) return 45;
-    const m = String(s).match(/([0-9]+)\s*(min|sec|s)/i);
+    const m = String(s).match(/(\d+)\s*(min|sec|s)/i);
     if (!m) return 45;
     return m[2].toLowerCase().startsWith('m') ? parseInt(m[1])*60 : parseInt(m[1]);
   };
@@ -1076,83 +1076,92 @@ function HIITPanel({token, profile, firstName, onClose}) {
 
 // ─── SÉANCE DU JOUR ───────────────────────────────────────────────────────────
 function SeanceExCard({ex, idx, accent, onSaveWeight, savedWeight, onLogSet}) {
-  const [open, setOpen] = React.useState(false);
-  const [done, setDone] = React.useState(false);
+  const [open, setOpen] = useState(false);
+  const [done, setDone] = useState(false);
   const totalSets = parseInt(String(ex.sets))||3;
   const restSecs = parseInt(String(ex.rest))||60;
   const defaultReps = String(ex.reps||"").split("-")[0]||"10";
-  const [sets, setSets] = React.useState(Array(totalSets).fill(false));
-  const [weights, setWeights] = React.useState(Array(totalSets).fill(savedWeight||""));
-  const [repsArr, setRepsArr] = React.useState(Array(totalSets).fill(defaultReps));
-  const [showRest, setShowRest] = React.useState(false);
+  const [sets, setSets] = useState(Array(totalSets).fill(false));
+  const [weights, setWeights] = useState(Array(totalSets).fill(savedWeight||""));
+  const [repsArr, setRepsArr] = useState(Array(totalSets).fill(defaultReps));
+  const [showRest, setShowRest] = useState(false);
 
   const handleWeight = (i, val) => {
     setWeights(prev => prev.map((w,j) => j===i ? val : (j>i && !sets[j] ? val : w)));
   };
   const handleReps = (i, val) => setRepsArr(prev => prev.map((r,j) => j===i ? val : r));
+
   const handleSet = (i) => {
     const ns = sets.map((s,j) => j===i ? !s : s);
     setSets(ns);
-    const doneCnt = ns.filter(Boolean).length;
+    const done = ns.filter(Boolean).length;
     if (ns[i]) {
       if (ns.every(Boolean)) {
         setDone(true); setShowRest(false);
-        speak("Exercice termine ! Bien joue.");
+        speak("Exercice terminé ! Bien joué.");
         if (weights[i] && onSaveWeight) onSaveWeight(ex.name, weights[i]);
-        if (onLogSet) onLogSet(ex.name, weights.map((w,j)=>({weight:w,reps:repsArr[j],done:ns[j]})));
+        if (onLogSet) onLogSet(ex.name, weights.map((w,j)=>({weight:w, reps:repsArr[j], done:ns[j]})));
       } else {
         setShowRest(true);
-        speak("Serie "+doneCnt+" terminee. Repos "+restSecs+" secondes.");
+        speak(`Série ${done} terminée. Repos ${restSecs} secondes.`);
       }
-    } else { setShowRest(false); }
+    } else {
+      setShowRest(false);
+    }
   };
 
-  const wOpts = ["0.5","1","1.5","2","2.5","3","4","5","6","7","8","9","10","11","12","13","14","15","16","17","18","19","20","22","24","25","26","28","30","32","34","35","38","40","42","44","45","48","50","55","60","65","70","75","80","90","100"];
-  const rOpts = Array.from({length:30},(_,i)=>String(i+1));
+  const weightOpts = ["",...[0.5,1,1.5,2,2.5,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,24,25,26,28,30,32,34,35,38,40,42,44,45,48,50,55,60,65,70,75,80,90,100]];
+  const repsOpts = Array.from({length:30},(_,i)=>String(i+1));
 
   return (
-    <div style={{background:done?accent+"22":"rgba(255,255,255,0.08)",border:"1.5px solid "+(done?accent:open?accent+"66":"rgba(255,255,255,0.2)"),borderRadius:12,marginBottom:10}}>
+    <div style={{background:done?accent+"22":"rgba(255,255,255,0.08)",border:`1.5px solid ${done?accent:open?accent+"66":"rgba(255,255,255,0.2)"}`,borderRadius:12,marginBottom:10}}>
       <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>
         <div style={{width:30,height:30,borderRadius:"50%",background:done?accent:accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:done?"#fff":accent,flexShrink:0}}>{done?"✓":idx+1}</div>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:14,color:"#f9fafb"}}>{ex.name}</div>
-          <div style={{fontSize:11,color:"#9ca3af"}}>{ex.sets}x{ex.reps} · {ex.rest}{savedWeight?" · "+savedWeight+"kg":""}</div>
+          <div style={{fontSize:11,color:"#9ca3af"}}>{ex.sets} × {ex.reps} · {ex.rest}{savedWeight?` · ${savedWeight}kg`:""}</div>
         </div>
         <span style={{fontSize:11,color:accent,fontWeight:700}}>{sets.filter(Boolean).length}/{totalSets}</span>
       </div>
       {open && (
         <div style={{borderTop:"1px solid rgba(255,255,255,0.1)",padding:"12px 14px"}}>
-          {ex.desc&&<p style={{fontSize:12,color:"#9ca3af",marginBottom:10}}>{ex.desc}</p>}
+          {ex.desc&&<p style={{fontSize:12,color:"#9ca3af",marginBottom:10,lineHeight:1.5}}>{ex.desc}</p>}
           <TechniqueTip name={ex.name} desc={ex.desc}/>
+          <div style={{fontSize:11,fontWeight:700,color:accent,marginBottom:8}}>{sets.filter(Boolean).length}/{totalSets} séries complétées</div>
           {sets.map((s,i)=>(
-            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:s?"rgba(99,102,241,0.15)":"rgba(255,255,255,0.05)",border:"1px solid "+(s?accent:"rgba(255,255,255,0.1)"),borderRadius:10,marginBottom:6}}>
-              <button onClick={()=>handleSet(i)} style={{width:30,height:30,borderRadius:"50%",background:s?accent:"transparent",border:"2px solid "+(s?accent:"rgba(255,255,255,0.3)"),color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",flexShrink:0}}>
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 12px",background:s?"rgba(99,102,241,0.15)":"rgba(255,255,255,0.05)",border:`1px solid ${s?accent:"rgba(255,255,255,0.1)"}`,borderRadius:10,marginBottom:6}}>
+              <button onClick={()=>handleSet(i)} style={{width:30,height:30,borderRadius:"50%",background:s?accent:"transparent",border:`2px solid ${s?accent:"rgba(255,255,255,0.3)"}`,color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",flexShrink:0}}>
                 {s?"✓":i+1}
               </button>
-              <div style={{fontSize:12,color:s?"#f9fafb":"#9ca3af",flex:1}}>Serie {i+1}</div>
+              <div style={{flex:1,fontSize:12,color:s?"#f9fafb":"#9ca3af",fontWeight:600}}>Série {i+1}</div>
               <div style={{display:"flex",gap:6}}>
                 <div>
                   <div style={{fontSize:9,color:"#6b7280",textAlign:"center",marginBottom:2}}>Reps</div>
-                  <select value={repsArr[i]} onChange={e=>handleReps(i,e.target.value)} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,padding:"4px",color:"#f9fafb",fontSize:13,fontWeight:700,outline:"none",width:50,cursor:"pointer"}}>
-                    {rOpts.map(n=><option key={n} value={n} style={{background:"#1a1f2e"}}>{n}</option>)}
+                  <select value={repsArr[i]} onChange={e=>handleReps(i,e.target.value)}
+                    style={{background:"rgba(255,255,255,0.1)",border:`1px solid ${s?accent:"rgba(255,255,255,0.2)"}`,borderRadius:8,padding:"5px 4px",color:"#f9fafb",fontSize:13,fontWeight:700,textAlign:"center",outline:"none",width:52,cursor:"pointer"}}>
+                    {repsOpts.map(n=><option key={n} value={n} style={{background:"#1a1f2e"}}>{n}</option>)}
                   </select>
                 </div>
                 <div>
                   <div style={{fontSize:9,color:"#6b7280",textAlign:"center",marginBottom:2}}>kg</div>
-                  <select value={weights[i]} onChange={e=>handleWeight(i,e.target.value)} style={{background:"rgba(255,255,255,0.1)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,padding:"4px",color:weights[i]?"#f9fafb":"#6b7280",fontSize:13,fontWeight:700,outline:"none",width:58,cursor:"pointer"}}>
-                    <option value="" style={{background:"#1a1f2e"}}>-kg</option>
-                    {wOpts.map(w=><option key={w} value={w} style={{background:"#1a1f2e"}}>{w}kg</option>)}
+                  <select value={weights[i]} onChange={e=>handleWeight(i,e.target.value)}
+                    style={{background:"rgba(255,255,255,0.1)",border:`1px solid ${s?accent:"rgba(255,255,255,0.2)"}`,borderRadius:8,padding:"5px 4px",color:weights[i]?"#f9fafb":"#6b7280",fontSize:13,fontWeight:700,textAlign:"center",outline:"none",width:60,cursor:"pointer"}}>
+                    <option value="" style={{background:"#1a1f2e"}}>— kg</option>
+                    {weightOpts.slice(1).map(w=><option key={w} value={String(w)} style={{background:"#1a1f2e"}}>{w}kg</option>)}
                   </select>
                 </div>
               </div>
             </div>
           ))}
-          {showRest&&<SeanceTimer key={sets.filter(Boolean).length} seconds={restSecs} label={"Repos"} accent={accent} onDone={()=>setShowRest(false)}/>}
+          {showRest&&(
+            <SeanceTimer key={sets.filter(Boolean).length} seconds={restSecs} label={`Repos — ${ex.rest}`} accent={accent} onDone={()=>setShowRest(false)}/>
+          )}
         </div>
       )}
     </div>
   );
 }
+
 
 function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSport}) {
   const [screen, setScreen] = useState(initialSport?"config":"sport"); // sport | config | loading | seance | resume
@@ -1465,7 +1474,7 @@ RÈGLES DE PROGRESSION :
 
     const prompt = `Tu es un coach sportif expert. Génère une séance unique pour ${firstName}.
 DURÉE TOTALE STRICTE : ${duree} min = échauffement ${warmupMins2} min + séance ${mainMins2} min + retour au calme ${cooldownMins2} min.
-Ne pas dépasser ${duree} min. Pour ${mainMins2} min de seance principale : Musculation max ${Math.max(2,Math.floor(mainMins2/9))} exercices (9min par exercice avec repos et installation). Ne pas depasser.
+Ne pas dépasser ${duree} min. Pour ${mainMins2} min de séance principale : adapter strictement le nombre d exercices. Musculation 3 series : max ${Math.max(2,Math.floor(mainMins2/9))} exercices (9min par exercice avec repos). Ne pas depasser cette limite.
 Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}
 ${profile ? `Niveau : ${profile.level} | Age : ${profile.age} ans` : ""}
 ${historyContext}
@@ -1818,32 +1827,71 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
             {/* Warmup */}
             {phase==="warmup" && (
               <div>
+                {/* Progress bar */}
+                <div style={{display:"flex",gap:4,marginBottom:12}}>
+                  {seanceData.warmup.exercices.map((_,i)=>(
+                    <div key={i} style={{flex:1,height:4,borderRadius:2,background:i<warmupExIdx?C.orange:i===warmupExIdx?"rgba(249,115,22,0.5)":"rgba(255,255,255,0.1)"}}/>
+                  ))}
+                </div>
+
                 {/* Current exercise hero */}
                 <div style={{background:`linear-gradient(180deg,${C.orange}18,transparent)`,border:`1px solid ${C.orange}33`,borderRadius:14,padding:"16px",marginBottom:12,textAlign:"center"}}>
-                  <div style={{fontSize:9,color:C.orange,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:6}}>Échauffement — {seanceData.warmup.duree} min</div>
-                  <div style={{fontSize:11,color:C.t4}}>Active tes muscles et prépare tes articulations</div>
-                  {seanceData.warmup.duree&&(
-                    <div style={{marginTop:12}}>
-                      {!warmupTimer
-                        ?<button onClick={()=>{setWarmupTimer(true);speak(`Échauffement. ${seanceData.warmup.duree} minutes. C'est parti !`);}} style={{padding:"9px 20px",background:C.orange,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>
-                          ⏱ Lancer le timer ({seanceData.warmup.duree} min)
-                        </button>
-                        :<SeanceTimer seconds={seanceData.warmup.duree*60} label={`Échauffement — ${seanceData.warmup.duree} min`} accent={C.orange} onDone={()=>{setWarmupTimer(false);setPhase("main");}}/>
-                      }
-                    </div>
-                  )}
+                  <div style={{fontSize:9,color:C.orange,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:8}}>
+                    Exercice {warmupExIdx+1}/{seanceData.warmup.exercices.length}
+                  </div>
+                  <div style={{fontSize:18,fontWeight:800,color:"#f9fafb",marginBottom:6}}>
+                    {seanceData.warmup.exercices[warmupExIdx]?.split(" - ")[0] || seanceData.warmup.exercices[warmupExIdx]}
+                  </div>
+                  <div style={{fontSize:13,color:C.orange,fontWeight:700,marginBottom:12}}>
+                    {seanceData.warmup.exercices[warmupExIdx]?.match(/\d+\s*(sec|min)/i)?.[0] || "45 sec"}
+                  </div>
+                  {warmupTimer
+                    ? <SeanceTimer
+                        key={warmupExIdx}
+                        seconds={parseExSecs(seanceData.warmup.exercices[warmupExIdx])}
+                        label={seanceData.warmup.exercices[warmupExIdx]?.split(" - ")[0]}
+                        accent={C.orange}
+                        onDone={()=>{
+                          const next = warmupExIdx + 1;
+                          if (next < seanceData.warmup.exercices.length) {
+                            setWarmupExIdx(next);
+                            speak(seanceData.warmup.exercices[next]?.split(" - ")[0] || "Exercice suivant");
+                          } else {
+                            setWarmupTimer(false);
+                            setWarmupExIdx(0);
+                            setPhase("main");
+                            speak(`Échauffement terminé. Séance principale. ${seanceData.main.length} exercices. C'est parti ${firstName} !`);
+                          }
+                        }}
+                      />
+                    : <button onClick={()=>{
+                        setWarmupTimer(true);
+                        speak(seanceData.warmup.exercices[warmupExIdx]?.split(" - ")[0] || "C'est parti");
+                      }} style={{padding:"10px 24px",background:C.orange,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                        ▶ Lancer
+                      </button>
+                  }
                 </div>
 
                 {/* Exercise list */}
-                <div style={{fontSize:9,color:C.t4,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Exercices — {seanceData.warmup.exercices.length}</div>
-                {seanceData.warmup.exercices.map((ex,i)=>(
-                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,marginBottom:6}}>
-                    <div style={{width:24,height:24,borderRadius:"50%",background:C.orange+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:C.orange,flexShrink:0}}>{i+1}</div>
-                    <span style={{fontSize:12,color:C.t2,flex:1}}>{ex}</span>
-                  </div>
-                ))}
-                <button onClick={()=>{setPhase("main");speak(`Séance principale. ${seanceData.main.length} exercices. C'est parti, ${firstName} !`);}} style={{width:"100%",marginTop:12,padding:"12px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
-                  Commencer la séance principale →
+                <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                  {seanceData.warmup.exercices.map((ex,i)=>(
+                    <div key={i} onClick={()=>{setWarmupExIdx(i);setWarmupTimer(false);}}
+                      style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
+                        background:i===warmupExIdx?C.orange+"18":i<warmupExIdx?"rgba(255,255,255,0.03)":"rgba(255,255,255,0.05)",
+                        border:`1px solid ${i===warmupExIdx?C.orange+"44":"rgba(255,255,255,0.08)"}`,
+                        borderRadius:10,cursor:"pointer",opacity:i<warmupExIdx?0.5:1}}>
+                      <div style={{width:22,height:22,borderRadius:"50%",background:i<warmupExIdx?C.green:i===warmupExIdx?C.orange:"rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:"#fff",flexShrink:0}}>
+                        {i<warmupExIdx?"✓":i+1}
+                      </div>
+                      <span style={{fontSize:12,color:i===warmupExIdx?"#f9fafb":"#9ca3af",flex:1}}>{ex}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <button onClick={()=>{setPhase("main");setWarmupExIdx(0);setWarmupTimer(false);speak(`Séance principale. ${seanceData.main.length} exercices. C'est parti, ${firstName} !`);}}
+                  style={{width:"100%",marginTop:14,padding:"12px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                  Passer à la séance principale →
                 </button>
               </div>
             )}
@@ -1914,10 +1962,10 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   <div style={{fontSize:13,color:C.t3,marginBottom:20}}>Bravo {firstName} — excellent travail !</div>
                   {/* Rating */}
                   <div style={{fontSize:13,fontWeight:700,color:C.t2,marginBottom:12}}>Comment c'était ?</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
                     {[{id:"facile",icon:"😴",l:"Trop facile",c:"#6b7280"},{id:"bien",icon:"💪",l:"Bien",c:C.green},{id:"dur",icon:"🔥",l:"Difficile",c:C.orange},{id:"epuise",icon:"💀",l:"Trop dur",c:C.red}].map(r=>(
-                      <button key={r.id} onClick={()=>{saveSession();speak(`${r.l} ! Bien joue.`);}} style={{background:`${r.c}22`,border:`1.5px solid ${r.c}55`,borderRadius:14,padding:"16px 8px",cursor:"pointer",textAlign:"center"}}>
-                        <div style={{fontSize:22,marginBottom:4}}>{r.icon}</div>
+                      <button key={r.id} onClick={()=>{saveSession();speak(`${r.l} ! Bien joué ${firstName}.`);}} style={{background:`${r.c}22`,border:`1.5px solid ${r.c}55`,borderRadius:14,padding:"16px 8px",cursor:"pointer",textAlign:"center"}}>
+                        <div style={{fontSize:28,marginBottom:6}}>{r.icon}</div>
                         <div style={{fontSize:11,fontWeight:700,color:r.c}}>{r.l}</div>
                       </button>
                     ))}
@@ -2692,66 +2740,51 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans apostrophes dans les val
 
       {/* Step 3: Result */}
       {step==="result"&&plan&&(
-        <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch"}}>
-          {/* Plan summary */}
-          <div style={{background:"linear-gradient(135deg,#2e1065,#4c1d95)",padding:"16px 20px"}}>
+        <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column"}}>
+          <div style={{background:"linear-gradient(135deg,#2e1065,#4c1d95)",padding:"16px",flexShrink:0}}>
             <div style={{fontSize:13,color:"rgba(255,255,255,0.7)",marginBottom:8}}>{plan.resume}</div>
-            {/* Phases */}
-            <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
+            <div style={{display:"flex",gap:6,overflowX:"auto"}}>
               {plan.phases?.map((p,i)=>(
                 <div key={i} style={{background:"rgba(255,255,255,0.1)",borderRadius:10,padding:"8px 12px",flexShrink:0}}>
                   <div style={{fontSize:11,fontWeight:700,color:"#c4b5fd"}}>{p.nom}</div>
-                  <div style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>{p.semaines} · {p.volume||p.objectif}</div>
+                  <div style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>{p.semaines}</div>
                 </div>
               ))}
             </div>
           </div>
-
           <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
-            {/* Conseils clés */}
-            {plan.conseils_cles?.length>0&&(
-              <div style={{background:"rgba(124,58,237,0.1)",border:"1px solid rgba(124,58,237,0.2)",borderRadius:14,padding:"14px",marginBottom:14}}>
-                <div style={{fontSize:11,fontWeight:700,color:"#c4b5fd",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>💡 Conseils clés</div>
-                {plan.conseils_cles.map((c,i)=>(
-                  <div key={i} style={{display:"flex",gap:8,marginBottom:6}}>
-                    <div style={{color:"#7c3aed",fontWeight:800,flexShrink:0}}>→</div>
-                    <div style={{fontSize:12,color:"#9ca3af",lineHeight:1.5}}>{c}</div>
-                  </div>
-                ))}
+            {plan.conseils_cles?.map((c,i)=>(
+              <div key={i} style={{display:"flex",gap:8,marginBottom:8,background:"rgba(124,58,237,0.08)",borderRadius:10,padding:"10px 12px"}}>
+                <div style={{color:"#7c3aed",fontWeight:800}}>{"→"}</div>
+                <div style={{fontSize:12,color:"#9ca3af"}}>{c}</div>
               </div>
-            )}
-
-            {/* Semaine type par phase */}
+            ))}
             {plan.semaine_type?.map((st,i)=>(
-              <div key={i} style={{marginBottom:16}}>
-                <div style={{fontSize:12,fontWeight:700,color:"#c4b5fd",marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>
-                  📅 Semaine type — {st.phase}
-                </div>
+              <div key={i} style={{marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#c4b5fd",marginBottom:8}}>{"📅 "}{st.phase}</div>
                 {st.jours?.map((s,j)=>(
-                  <div key={j} style={{background:s.type==="Repos"?"rgba(255,255,255,0.03)":"rgba(255,255,255,0.07)",border:`1px solid ${s.type==="Repos"?"rgba(255,255,255,0.05)":"rgba(255,255,255,0.12)"}`,borderRadius:12,padding:"10px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:12}}>
-                    <div style={{flexShrink:0,width:68}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"#6b7280"}}>{s.jour}</div>
-                      {s.duree&&<div style={{fontSize:10,color:"#4b5563",marginTop:1}}>{s.duree} min</div>}
+                  <div key={j} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"rgba(255,255,255,0.05)",borderRadius:10,marginBottom:5}}>
+                    <div style={{width:64,flexShrink:0}}>
+                      <div style={{fontSize:11,color:"#6b7280"}}>{s.jour}</div>
+                      {s.duree&&<div style={{fontSize:10,color:"#4b5563"}}>{s.duree}{"min"}</div>}
                     </div>
                     <div style={{flex:1}}>
-                      <span style={{background:getTypeColor(s.type)+"22",color:getTypeColor(s.type),fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,marginBottom:4,display:"inline-block"}}>{s.type}</span>
-                      {s.detail&&<div style={{fontSize:12,color:"#9ca3af",lineHeight:1.4}}>{s.detail}</div>}
+                      <div style={{fontSize:10,fontWeight:700,color:getTypeColor(s.type),marginBottom:2}}>{s.type}</div>
+                      {s.detail&&<div style={{fontSize:11,color:"#9ca3af"}}>{s.detail}</div>}
                     </div>
                   </div>
                 ))}
               </div>
             ))}
-
-            {/* Nutrition & Matériel */}
             {plan.nutrition&&(
-              <div style={{background:"rgba(22,163,74,0.1)",border:"1px solid rgba(22,163,74,0.2)",borderRadius:14,padding:"14px",marginBottom:12}}>
-                <div style={{fontSize:11,fontWeight:700,color:"#86efac",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>🥗 Nutrition</div>
-                <div style={{fontSize:12,color:"#9ca3af",lineHeight:1.6}}>{plan.nutrition}</div>
+              <div style={{background:"rgba(22,163,74,0.1)",border:"1px solid rgba(22,163,74,0.2)",borderRadius:12,padding:"12px",marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#86efac",marginBottom:6}}>{"🥗 Nutrition"}</div>
+                <div style={{fontSize:12,color:"#9ca3af"}}>{plan.nutrition}</div>
               </div>
             )}
             {plan.materiel?.length>0&&(
-              <div style={{background:"rgba(59,111,240,0.1)",border:"1px solid rgba(59,111,240,0.2)",borderRadius:14,padding:"14px",marginBottom:20}}>
-                <div style={{fontSize:11,fontWeight:700,color:"#93c5fd",textTransform:"uppercase",letterSpacing:".08em",marginBottom:8}}>🎒 Matériel recommandé</div>
+              <div style={{background:"rgba(59,111,240,0.1)",border:"1px solid rgba(59,111,240,0.2)",borderRadius:12,padding:"12px",marginBottom:20}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#93c5fd",marginBottom:6}}>{"🎒 Matériel"}</div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   {plan.materiel.map((m,i)=>(
                     <span key={i} style={{background:"rgba(59,111,240,0.15)",color:"#93c5fd",fontSize:11,padding:"4px 10px",borderRadius:20}}>{m}</span>
@@ -2760,7 +2793,8 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans apostrophes dans les val
               </div>
             )}
           </div>
-
+        </div>
+      )}
       {/* Loading */}
       {loading&&(
         <div style={{position:"absolute",inset:0,background:"rgba(15,17,23,0.9)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,zIndex:10}}>
@@ -2774,7 +2808,6 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans apostrophes dans les val
       )}
     </div>
   );
-}
 }
 
 
