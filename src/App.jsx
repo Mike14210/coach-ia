@@ -821,7 +821,8 @@ function speak(text) {
 }
 
 function SeanceTimer({seconds, label, accent, onDone}) {
-  const [rem, setRem] = useState(seconds);
+  const safeSecs = (typeof seconds === "number" && seconds > 0) ? seconds : 45;
+  const [rem, setRem] = useState(safeSecs);
   const [run, setRun] = useState(true);
   const ref = useRef(null);
   useEffect(() => {
@@ -885,9 +886,11 @@ function HIITPanel({token, profile, firstName, onClose}) {
 
   const parseExSecs = (s) => {
     if (!s) return 45;
-    const m = String(s).match(/(\d+)\s*(min|sec|s)/i);
-    if (!m) return 45;
-    return m[2].toLowerCase().startsWith('m') ? parseInt(m[1])*60 : parseInt(m[1]);
+    const str = String(s);
+    const m = str.match(/(\d+)\s*(min|sec|s|seconde)/i);
+    if (m) return m[2].toLowerCase().startsWith('m') ? parseInt(m[1])*60 : parseInt(m[1]);
+    const n = parseInt(str.match(/(\d+)/)?.[1]);
+    return (n && n > 0 && n < 600) ? n : 45;
   };
   const generate = async () => {
     setScreen("loading");
