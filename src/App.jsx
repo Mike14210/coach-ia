@@ -821,46 +821,62 @@ function speak(text) {
 }
 
 function SeanceTimer({seconds, label, accent, onDone}) {
-  const safeSecs = (typeof seconds === "number" && seconds > 0) ? seconds : 45;
+  const safeSecs = (typeof seconds === "number" && seconds > 0 && !isNaN(seconds)) ? Math.round(seconds) : 45;
   const [rem, setRem] = useState(safeSecs);
   const [run, setRun] = useState(true);
-  const ref = useRef(null);
+  const endTime = useRef(Date.now() + safeSecs * 1000);
+  const spoken10 = useRef(false);
+  const spoken5 = useRef(false);
+
   useEffect(() => {
     if (!run) return;
-    ref.current = setInterval(() => setRem(r => {
-      if (r <= 1) { clearInterval(ref.current); onDone && onDone(); speak("C'est reparti !"); return 0; }
-      if (r === 10) speak("10 secondes.");
-      if (r === 5) speak("5, 4, 3, 2, 1");
-      return r - 1;
-    }), 1000);
-    return () => clearInterval(ref.current);
+    endTime.current = Date.now() + rem * 1000;
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.round((endTime.current - Date.now()) / 1000));
+      setRem(left);
+      if (left <= 10 && !spoken10.current) { spoken10.current = true; speak("10 secondes."); }
+      if (left <= 5 && !spoken5.current) { spoken5.current = true; speak("5, 4, 3, 2, 1"); }
+      if (left <= 0) {
+        clearInterval(interval);
+        speak("C'est reparti !");
+        onDone && onDone();
+      }
+    }, 500);
+    return () => clearInterval(interval);
   }, [run]);
-  const pct = (rem / seconds) * 100;
-  const r = 28, circ = 2 * Math.PI * r;
-  const mins = Math.floor(rem / 60);
-  const secs = rem % 60;
+
+  const pct = safeSecs > 0 ? (rem / safeSecs) : 0;
+  const r = 40, circ = 2 * Math.PI * r;
+
   return (
-    <div style={{display:"flex",alignItems:"center",gap:10,background:accent+"12",borderRadius:10,padding:"10px 14px",marginTop:8}}>
-      <svg width={66} height={66} viewBox="0 0 66 66" style={{flexShrink:0}}>
-        <circle cx="33" cy="33" r={r} fill="none" stroke={C.bord} strokeWidth="5"/>
-        <circle cx="33" cy="33" r={r} fill="none" stroke={accent} strokeWidth="5"
-          strokeDasharray={circ} strokeDashoffset={circ*(1-pct/100)}
-          strokeLinecap="round" transform="rotate(-90 33 33)"
-          style={{transition:"stroke-dashoffset 1s linear"}}/>
-        <text x="33" y="33" textAnchor="middle" dominantBaseline="central" fill={accent} fontSize="13" fontWeight="800">
-          {mins>0?`${mins}:${String(secs).padStart(2,'0')}`:`${secs}s`}
-        </text>
-      </svg>
-      <div style={{flex:1}}>
-        <div style={{fontSize:12,color:accent,fontWeight:700,marginBottom:4}}>{label}</div>
-        <div style={{display:"flex",gap:6}}>
-          <button onClick={()=>setRun(r=>!r)} style={{padding:"5px 12px",borderRadius:7,border:`1.5px solid ${accent}`,background:"transparent",color:accent,fontWeight:700,fontSize:12,cursor:"pointer"}}>{run?"⏸ Pause":"▶ Reprendre"}</button>
-          <button onClick={()=>{setRun(false);onDone&&onDone();}} style={{padding:"5px 12px",borderRadius:7,border:"none",background:accent,color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}}>Passer →</button>
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"16px 0"}}>
+      <div style={{position:"relative",width:100,height:100,marginBottom:12}}>
+        <svg width="100" height="100" viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="8"/>
+          <circle cx="50" cy="50" r={r} fill="none" stroke={rem<=5?"#ef4444":rem<=10?C.orange:accent}
+            strokeWidth="8" strokeDasharray={circ} strokeDashoffset={circ*(1-pct)}
+            strokeLinecap="round" transform="rotate(-90 50 50)" style={{transition:"stroke-dashoffset 0.5s"}}/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+          <div style={{fontSize:22,fontWeight:900,color:rem<=5?"#ef4444":accent}}>{rem}</div>
+          <div style={{fontSize:9,color:"#6b7280"}}>sec</div>
         </div>
+      </div>
+      {label&&<div style={{fontSize:12,color:"#9ca3af",marginBottom:10,textAlign:"center"}}>{label}</div>}
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={()=>{setRun(r=>!r);if(!run)endTime.current=Date.now()+rem*1000;}}
+          style={{padding:"7px 16px",background:"rgba(255,255,255,0.1)",border:"none",borderRadius:8,color:"#9ca3af",fontSize:12,cursor:"pointer",fontWeight:600}}>
+          {run?"⏸ Pause":"▶ Reprendre"}
+        </button>
+        <button onClick={()=>{onDone&&onDone();}}
+          style={{padding:"7px 16px",background:accent+"22",border:"none",borderRadius:8,color:accent,fontSize:12,cursor:"pointer",fontWeight:600}}>
+          Passer →
+        </button>
       </div>
     </div>
   );
 }
+
 
 function HIITPanel({token, profile, firstName, onClose}) {
   const [screen, setScreen] = useState("config");
@@ -1179,8 +1195,11 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
   const [phase, setPhase] = useState("warmup");
   const [warmupTimer, setWarmupTimer] = useState(false);
   const [warmupExIdx, setWarmupExIdx] = useState(0);
+  const [cooldownExIdx, setCooldownExIdx] = useState(0);
+  const [cooldownTimer, setCooldownTimer] = useState(false);
   const [savedWeights, setSavedWeights] = useState({});
-  const [sessionLog, setSessionLog] = useState([]); // [{name, sets:[{weight,reps}]}]
+  const [sessionLog, setSessionLog] = useState([]);
+  const [rating, setRating] = useState(null); // [{name, sets:[{weight,reps}]}]
 
   // Load saved weights on mount
   useEffect(() => {
@@ -1477,7 +1496,7 @@ RÈGLES DE PROGRESSION :
 
     const prompt = `Tu es un coach sportif expert. Génère une séance unique pour ${firstName}.
 DURÉE TOTALE STRICTE : ${duree} min = échauffement ${warmupMins2} min + séance ${mainMins2} min + retour au calme ${cooldownMins2} min.
-Ne pas dépasser ${duree} min. Pour ${mainMins2} min de séance principale : adapter strictement le nombre d exercices. Musculation 3 series : max ${Math.max(2,Math.floor(mainMins2/9))} exercices (9min par exercice avec repos). Ne pas depasser cette limite.
+Ne pas dépasser ${duree} min. Pour ${mainMins2} min de séance principale : musculation ${Math.max(3,Math.floor(mainMins2/8))} exercices (8min/exercice : 3 séries + repos + installation). Respecter strictement ce nombre.par exercice avec repos). Ne pas depasser cette limite.
 Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}
 ${profile ? `Niveau : ${profile.level} | Age : ${profile.age} ans` : ""}
 ${historyContext}
@@ -1953,10 +1972,56 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   <div style={{fontSize:11,color:C.t4}}>Étirements et récupération — ne zappe pas cette étape !</div>
                 </div>
                 <div style={{fontSize:9,color:C.t4,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Étirements</div>
+                {/* Progress */}
+                <div style={{display:"flex",gap:4,marginBottom:12}}>
+                  {seanceData.cooldown.exercices.map((_,i)=>(
+                    <div key={i} style={{flex:1,height:4,borderRadius:2,background:i<cooldownExIdx?C.green:i===cooldownExIdx?"rgba(16,185,129,0.5)":"rgba(255,255,255,0.1)"}}/>
+                  ))}
+                </div>
+                {/* Current exercise */}
+                <div style={{background:"rgba(16,185,129,0.1)",border:"1px solid rgba(16,185,129,0.2)",borderRadius:14,padding:"16px",marginBottom:12,textAlign:"center"}}>
+                  <div style={{fontSize:9,color:C.green,fontWeight:700,textTransform:"uppercase",marginBottom:8}}>
+                    Étirement {cooldownExIdx+1}/{seanceData.cooldown.exercices.length}
+                  </div>
+                  <div style={{fontSize:16,fontWeight:800,color:"#f9fafb",marginBottom:6}}>
+                    {seanceData.cooldown.exercices[cooldownExIdx]?.split(" - ")[0]}
+                  </div>
+                  <div style={{fontSize:13,color:C.green,fontWeight:700,marginBottom:12}}>
+                    {seanceData.cooldown.exercices[cooldownExIdx]?.match(/\d+\s*(sec|min)/i)?.[0] || "30 sec"}
+                  </div>
+                  {cooldownTimer
+                    ? <SeanceTimer
+                        key={"cool-"+cooldownExIdx}
+                        seconds={parseExSecs(seanceData.cooldown.exercices[cooldownExIdx])}
+                        label={seanceData.cooldown.exercices[cooldownExIdx]?.split(" - ")[0]}
+                        accent={C.green}
+                        onDone={()=>{
+                          const next = cooldownExIdx + 1;
+                          if (next < seanceData.cooldown.exercices.length) {
+                            setCooldownExIdx(next);
+                            speak(seanceData.cooldown.exercices[next]?.split(" - ")[0] || "Étirement suivant");
+                          } else {
+                            setCooldownTimer(false);
+                          }
+                        }}
+                      />
+                    : <button onClick={()=>{setCooldownTimer(true);speak(seanceData.cooldown.exercices[cooldownExIdx]?.split(" - ")[0]||"C'est parti");}}
+                        style={{padding:"10px 24px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                        ▶ Lancer
+                      </button>
+                  }
+                </div>
+                {/* Exercise list */}
                 {seanceData.cooldown.exercices.map((ex,i)=>(
-                  <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,marginBottom:6}}>
-                    <div style={{width:24,height:24,borderRadius:"50%",background:"rgba(16,185,129,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:C.green,flexShrink:0}}>{i+1}</div>
-                    <span style={{fontSize:12,color:C.t2,flex:1}}>{ex}</span>
+                  <div key={i} onClick={()=>{setCooldownExIdx(i);setCooldownTimer(false);}}
+                    style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",
+                      background:i===cooldownExIdx?C.green+"18":i<cooldownExIdx?"rgba(255,255,255,0.03)":"rgba(255,255,255,0.05)",
+                      border:"1px solid "+(i===cooldownExIdx?C.green+"44":"rgba(255,255,255,0.08)"),
+                      borderRadius:10,marginBottom:5,cursor:"pointer",opacity:i<cooldownExIdx?0.5:1}}>
+                    <div style={{width:22,height:22,borderRadius:"50%",background:i<cooldownExIdx?C.green:i===cooldownExIdx?"rgba(16,185,129,0.3)":"rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:"#fff",flexShrink:0}}>
+                      {i<cooldownExIdx?"✓":i+1}
+                    </div>
+                    <span style={{fontSize:12,color:i===cooldownExIdx?"#f9fafb":"#9ca3af",flex:1}}>{ex}</span>
                   </div>
                 ))}
                 <div style={{marginTop:24,textAlign:"center",padding:"20px"}}>
@@ -1967,7 +2032,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   <div style={{fontSize:13,fontWeight:700,color:C.t2,marginBottom:12}}>Comment c'était ?</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
                     {[{id:"facile",icon:"😴",l:"Trop facile",c:"#6b7280"},{id:"bien",icon:"💪",l:"Bien",c:C.green},{id:"dur",icon:"🔥",l:"Difficile",c:C.orange},{id:"epuise",icon:"💀",l:"Trop dur",c:C.red}].map(r=>(
-                      <button key={r.id} onClick={()=>{saveSession();speak(`${r.l} ! Bien joué ${firstName}.`);}} style={{background:`${r.c}22`,border:`1.5px solid ${r.c}55`,borderRadius:14,padding:"16px 8px",cursor:"pointer",textAlign:"center"}}>
+                      <button key={r.id} onClick={()=>{setRating(r.id);saveSession();speak(`${r.l} ! Bien joue ${firstName}.`);}} style={{background:rating===r.id?r.c:`${r.c}22`,border:`2px solid ${rating===r.id?r.c:r.c+"55"}`,borderRadius:14,padding:"16px 8px",cursor:"pointer",textAlign:"center"}}>
                         <div style={{fontSize:28,marginBottom:6}}>{r.icon}</div>
                         <div style={{fontSize:11,fontWeight:700,color:r.c}}>{r.l}</div>
                       </button>
