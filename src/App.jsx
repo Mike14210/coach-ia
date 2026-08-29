@@ -2028,7 +2028,8 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                 ))}
                 <div style={{marginTop:24,textAlign:"center",padding:"20px"}}>
                   <div style={{fontSize:48,marginBottom:12}}>🏆</div>
-                  <div style={{fontS                  {(()=>{
+                  <div style={{fontSize:18,fontWeight:800,color:"#f9fafb",marginBottom:6}}>Séance terminée !</div>
+                  {(()=>{
                     const totalVol = sessionLog.reduce((acc,ex)=>acc+(ex.sets||[]).reduce((a,s)=>a+(parseFloat(s.weight)||0)*(parseFloat(s.reps)||0),0),0);
                     const duration = seanceStart ? Math.round((Date.now()-seanceStart)/60000) : null;
                     return (totalVol>0||duration) ? (
