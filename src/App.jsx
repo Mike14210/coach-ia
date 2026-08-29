@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react"; // v2.1
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Remplace par ton domaine quand il sera configuré
