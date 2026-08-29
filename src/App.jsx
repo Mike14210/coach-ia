@@ -1199,6 +1199,7 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
   const [cooldownTimer, setCooldownTimer] = useState(false);
   const [savedWeights, setSavedWeights] = useState({});
   const [sessionLog, setSessionLog] = useState([]);
+  const [seanceStart, setSeanceStart] = useState(null);
   const [rating, setRating] = useState(null); // [{name, sets:[{weight,reps}]}]
 
   // Load saved weights on mount
@@ -1881,6 +1882,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                           } else {
                             setWarmupTimer(false);
                             setWarmupExIdx(0);
+                            setSeanceStart(Date.now());
                             setPhase("main");
                             speak(`Échauffement terminé. Séance principale. ${seanceData.main.length} exercices. C'est parti ${firstName} !`);
                           }
@@ -2026,6 +2028,22 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                 ))}
                 <div style={{marginTop:24,textAlign:"center",padding:"20px"}}>
                   <div style={{fontSize:48,marginBottom:12}}>🏆</div>
+                  <div style={{fontS                  {(()=>{
+                    const totalVol = sessionLog.reduce((acc,ex)=>acc+(ex.sets||[]).reduce((a,s)=>a+(parseFloat(s.weight)||0)*(parseFloat(s.reps)||0),0),0);
+                    const duration = seanceStart ? Math.round((Date.now()-seanceStart)/60000) : null;
+                    return (totalVol>0||duration) ? (
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16,width:"100%"}}>
+                        {duration&&<div style={{background:"rgba(99,102,241,0.15)",border:"1px solid rgba(99,102,241,0.3)",borderRadius:12,padding:"12px",textAlign:"center"}}>
+                          <div style={{fontSize:22,fontWeight:900,color:"#818cf8"}}>{duration}</div>
+                          <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>min</div>
+                        </div>}
+                        {totalVol>0&&<div style={{background:"rgba(16,185,129,0.15)",border:"1px solid rgba(16,185,129,0.3)",borderRadius:12,padding:"12px",textAlign:"center"}}>
+                          <div style={{fontSize:22,fontWeight:900,color:"#34d399"}}>{totalVol>=1000?(totalVol/1000).toFixed(1)+"t":Math.round(totalVol)+"kg"}</div>
+                          <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>volume</div>
+                        </div>}
+                      </div>
+                    ) : null;
+                  })()}
                   <div style={{fontSize:18,fontWeight:800,color:C.t1,marginBottom:6}}>Séance terminée !</div>
                   <div style={{fontSize:13,color:C.t3,marginBottom:20}}>Bravo {firstName} — excellent travail !</div>
                   {/* Rating */}
@@ -2047,12 +2065,10 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
           </div>
         </div>
       )}
+      )}
     </div>
   );
 }
-
-
-// ─── NUTRITION DISPLAY ────────────────────────────────────────────────────────
 function NutritionDisplay({text}) {
   if (!text) return null;
   
@@ -2881,7 +2897,145 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans apostrophes dans les val
 
 // ─── HOME SCREEN ─────────────────────────────────────────────────────────────
 
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil}) {
+function BodyWeightTracker({onClose}) {
+  const [entries, setEntries] = React.useState([]);
+  const [input, setInput] = React.useState("");
+  const [unit, setUnit] = React.useState("kg");
+
+  React.useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("coach_weight_log") || "[]");
+      setEntries(saved);
+    } catch {}
+  }, []);
+
+  const save = () => {
+    const val = parseFloat(input.replace(",","."));
+    if (!val || val < 20 || val > 300) return;
+    const entry = {date: new Date().toISOString(), weight: val, unit};
+    const updated = [entry, ...entries].slice(0, 365);
+    setEntries(updated);
+    try { localStorage.setItem("coach_weight_log", JSON.stringify(updated)); } catch {}
+    setInput("");
+  };
+
+  const last30 = entries.slice(0, 30).reverse();
+  const weights = last30.map(e => e.weight);
+  const minW = weights.length > 0 ? Math.min(...weights) - 1 : 50;
+  const maxW = weights.length > 0 ? Math.max(...weights) + 1 : 100;
+  const range = maxW - minW || 1;
+  const W = 300, H = 120;
+
+  const toX = (i) => (i / Math.max(weights.length - 1, 1)) * (W - 20) + 10;
+  const toY = (w) => H - ((w - minW) / range) * (H - 20) - 10;
+
+  const trend = weights.length >= 2 ? (weights[weights.length-1] - weights[0]).toFixed(1) : null;
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:"linear-gradient(135deg,#1e3a5f,#2563eb)",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>⚖️ Poids corporel</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.6)"}}>{entries.length} mesure{entries.length!==1?"s":""} enregistrée{entries.length!==1?"s":""}</div>
+        </div>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+        {/* Saisie */}
+        <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:14,padding:"16px",marginBottom:16}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#f9fafb",marginBottom:12}}>Peser aujourd'hui</div>
+          <div style={{display:"flex",gap:8}}>
+            <input type="number" value={input} onChange={e=>setInput(e.target.value)}
+              placeholder="Ex: 78.5" step="0.1"
+              style={{flex:1,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:10,padding:"10px 14px",color:"#f9fafb",fontSize:16,fontWeight:700,outline:"none"}}/>
+            <select value={unit} onChange={e=>setUnit(e.target.value)}
+              style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:10,padding:"10px",color:"#f9fafb",fontSize:14,outline:"none",cursor:"pointer"}}>
+              <option value="kg">kg</option>
+              <option value="lbs">lbs</option>
+            </select>
+            <button onClick={save}
+              style={{padding:"10px 18px",background:"#2563eb",border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+              ✓
+            </button>
+          </div>
+        </div>
+
+        {/* Résumé */}
+        {entries.length > 0 && (
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
+            <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"12px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:900,color:"#60a5fa"}}>{entries[0].weight}</div>
+              <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>Actuel</div>
+            </div>
+            {entries.length >= 7 && (
+              <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"12px",textAlign:"center"}}>
+                <div style={{fontSize:20,fontWeight:900,color:parseFloat(trend)<0?C.green:parseFloat(trend)>0?C.orange:"#9ca3af"}}>
+                  {trend > 0 ? "+"+trend : trend} kg
+                </div>
+                <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>30 jours</div>
+              </div>
+            )}
+            <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"12px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:900,color:"#9ca3af"}}>{Math.min(...entries.map(e=>e.weight))}</div>
+              <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>Min</div>
+            </div>
+          </div>
+        )}
+
+        {/* Graphique */}
+        {weights.length >= 2 && (
+          <div style={{background:"rgba(255,255,255,0.04)",borderRadius:14,padding:"16px",marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:10,textTransform:"uppercase"}}>Évolution — 30 jours</div>
+            <svg width="100%" viewBox={"0 0 "+W+" "+H} style={{overflow:"visible"}}>
+              {/* Grid lines */}
+              {[0,0.25,0.5,0.75,1].map((t,i)=>(
+                <line key={i} x1={10} y1={H-t*(H-20)-10} x2={W-10} y2={H-t*(H-20)-10}
+                  stroke="rgba(255,255,255,0.05)" strokeWidth="1"/>
+              ))}
+              {/* Line */}
+              <polyline
+                points={weights.map((w,i)=>toX(i)+","+toY(w)).join(" ")}
+                fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* Area */}
+              <polyline
+                points={"10,"+H+" "+weights.map((w,i)=>toX(i)+","+toY(w)).join(" ")+" "+(W-10)+","+H}
+                fill="rgba(59,130,246,0.1)" stroke="none"/>
+              {/* Dots */}
+              {weights.map((w,i)=>(
+                <circle key={i} cx={toX(i)} cy={toY(w)} r="4" fill="#3b82f6"/>
+              ))}
+            </svg>
+          </div>
+        )}
+
+        {/* Historique */}
+        <div style={{fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",marginBottom:8}}>Historique</div>
+        {entries.slice(0,10).map((e,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",padding:"10px 14px",background:"rgba(255,255,255,0.04)",borderRadius:10,marginBottom:6}}>
+            <div style={{flex:1,fontSize:12,color:"#9ca3af"}}>
+              {new Date(e.date).toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"})}
+            </div>
+            <div style={{fontSize:15,fontWeight:700,color:"#f9fafb"}}>{e.weight} {e.unit}</div>
+            {i>0 && (
+              <div style={{fontSize:11,marginLeft:8,color:e.weight<entries[i-1]?.weight?C.green:e.weight>entries[i-1]?.weight?C.orange:"#6b7280",width:40,textAlign:"right"}}>
+                {e.weight<entries[i-1]?.weight?"▼ "+(entries[i-1].weight-e.weight).toFixed(1):e.weight>entries[i-1]?.weight?"▲ "+(e.weight-entries[i-1].weight).toFixed(1):"="}
+              </div>
+            )}
+          </div>
+        ))}
+        {entries.length === 0 && (
+          <div style={{textAlign:"center",padding:"40px 20px",color:"#6b7280",fontSize:13}}>
+            Aucune mesure. Commence maintenant !
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -2980,6 +3134,7 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
         {[
           {icon:"🏠",label:"Accueil",active:true,fn:null},
           {icon:"📋",label:"Programme",active:false,fn:onProgram},
+          {icon:"⚖️",label:"Poids",active:false,fn:onWeight},
           {icon:"🥗",label:"Nutrition",active:false,fn:onNutrition},
           {icon:"⚙️",label:"Profil",active:false,fn:onProfil},
         ].map((item,i)=>(
@@ -3013,6 +3168,7 @@ export default function App() {
   const [showSeance,setShowSeance]=useState(false);
   const [initialSport,setInitialSport]=useState(null);
   const [showPrep,setShowPrep]=useState(false);
+  const [showWeight,setShowWeight]=useState(false);
   const [showHIIT,setShowHIIT]=useState(false);
   const [logData,setLogData]=useState({});
   const [loading,setLoading]=useState(true);
@@ -3175,6 +3331,7 @@ export default function App() {
       {showJournal&&<Journal token={token} onClose={()=>setShowJournal(false)}/>}
       {showSeance&&<SeancePanel token={token} profile={profile} firstName={firstName} initialSport={initialSport} onClose={()=>setShowSeance(false)} sendToChat={send}/>}
       {showHIIT&&<HIITPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowHIIT(false)}/>}
+      {showWeight&&<BodyWeightTracker onClose={()=>setShowWeight(false)}/>}
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
       {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send}/>}
 
@@ -3217,6 +3374,7 @@ export default function App() {
               onHIIT={()=>setShowHIIT(true)}
               onNutrition={()=>setShowNutrition(true)}
               onProfil={()=>setScreen("form")}
+              onWeight={()=>setShowWeight(true)}
             />
           )}
           {!homeScreen&&msgs.map((m,i)=><Bubble key={i} msg={m} profile={profile} firstName={firstName} logData={logData} onLogSet={handleLogSet}/>)}
