@@ -2066,7 +2066,6 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
           </div>
         </div>
       )}
-      )}
     </div>
   );
 }
@@ -2899,11 +2898,11 @@ Réponds UNIQUEMENT en JSON valide, sans markdown, sans apostrophes dans les val
 // ─── HOME SCREEN ─────────────────────────────────────────────────────────────
 
 function BodyWeightTracker({onClose}) {
-  const [entries, setEntries] = React.useState([]);
-  const [input, setInput] = React.useState("");
-  const [unit, setUnit] = React.useState("kg");
+  const [entries, setEntries] = useState([]);
+  const [input, setInput] = useState("");
+  const [unit, setUnit] = useState("kg");
 
-  React.useEffect(() => {
+  useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("coach_weight_log") || "[]");
       setEntries(saved);
