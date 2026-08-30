@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react"; // v2.1
+import { MuscleMap, computeSessionMuscles, computeRecentMuscles } from "./muscleData";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Remplace par ton domaine quand il sera configuré
@@ -1269,7 +1270,7 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
           type: "seance",
           sport: sport || "musculation",
           titre: seanceData?.titre || `Séance ${sport}`,
-          duree, objectif,
+          duree, objectif, muscles,
           exercises: updated,
           status: "in_progress"
         };
@@ -1293,6 +1294,7 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
       titre: seanceData?.titre || `Séance ${sport}`,
       duree,
       objectif,
+      muscles,
       exercises: sessionLog
     };
     try {
@@ -2045,6 +2047,12 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                       </div>
                     ) : null;
                   })()}
+                  {(()=>{ const rm = computeSessionMuscles({ muscles, sport, duree }); return Object.keys(rm).length>0 ? (
+                    <div style={{marginBottom:18}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.t2,marginBottom:10}}>Muscles travaillés</div>
+                      <MuscleMap gender={profile?.gender==="femme"?"female":"male"} data={rm} height={230} />
+                    </div>
+                  ) : null; })()}
                   <div style={{fontSize:18,fontWeight:800,color:C.t1,marginBottom:6}}>Séance terminée !</div>
                   <div style={{fontSize:13,color:C.t3,marginBottom:20}}>Bravo {firstName} — excellent travail !</div>
                   {/* Rating */}
@@ -3035,7 +3043,64 @@ function BodyWeightTracker({onClose}) {
 }
 
 
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight}) {
+function MuscleScreen({ profile, onClose }) {
+  const [days, setDays] = useState(7);
+  const [gender, setGender] = useState(profile?.gender === "femme" ? "female" : "male");
+  const [sessions, setSessions] = useState([]);
+  useEffect(() => {
+    try { setSessions(JSON.parse(localStorage.getItem("coach_sessions") || "[]")); } catch {}
+  }, []);
+  const data = computeRecentMuscles(sessions, days);
+  const nb = sessions.filter(s => s && s.type !== "weight" && (!s.date || Date.now() - new Date(s.date).getTime() < days*864e5)).length;
+  const worked = Object.keys(data).length;
+  const LEG = [["#2b3242","Non travaillé"],["rgba(16,185,129,0.35)","1×"],["rgba(16,185,129,0.65)","2×"],["#10b981","3×+"]];
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:"linear-gradient(135deg,#064e3b,#059669)",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>💪 Muscles travaillés</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.65)"}}>{nb} séance{nb!==1?"s":""} · {worked} groupe{worked!==1?"s":""} sollicité{worked!==1?"s":""}</div>
+        </div>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          {[[7,"7 jours"],[30,"30 jours"],[3650,"Tout"]].map(([d,l])=>(
+            <button key={d} onClick={()=>setDays(d)} style={{flex:1,padding:9,borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,
+              background:days===d?"rgba(16,185,129,0.18)":C.surf,border:`1.5px solid ${days===d?C.green:C.bord}`,color:days===d?"#6ee7b7":C.t2}}>{l}</button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          {[["male","Homme"],["female","Femme"]].map(([g,l])=>(
+            <button key={g} onClick={()=>setGender(g)} style={{flex:1,padding:8,borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:700,
+              background:gender===g?"rgba(16,185,129,0.18)":C.surf,border:`1.5px solid ${gender===g?C.green:C.bord}`,color:gender===g?"#6ee7b7":C.t2}}>{l}</button>
+          ))}
+        </div>
+        {nb===0 ? (
+          <div style={{textAlign:"center",padding:"48px 20px"}}>
+            <div style={{fontSize:44,marginBottom:12}}>🗺️</div>
+            <div style={{fontSize:14,fontWeight:700,color:C.t2,marginBottom:6}}>Aucune séance sur la période</div>
+            <div style={{fontSize:13,color:C.t4}}>Termine une séance pour voir tes muscles se colorer ici.</div>
+          </div>
+        ) : (
+          <>
+            <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:16,padding:"16px 8px",marginBottom:16}}>
+              <MuscleMap gender={gender} data={data} height={320} />
+            </div>
+            <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
+              {LEG.map(([c,l])=>(
+                <div key={l} style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:C.t3}}>
+                  <span style={{width:14,height:14,borderRadius:4,background:c,border:`1px solid ${C.bordM}`}}/>{l}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -3112,6 +3177,16 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
           <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"5px 10px",fontSize:11,color:"#fff",fontWeight:700,flexShrink:0}}>GO →</div>
         </button>
 
+        {/* Muscles travaillés */}
+        <button onClick={onMuscles} style={{width:"100%",background:`linear-gradient(135deg,#064e3b,${C.green})`,border:"none",borderRadius:18,padding:"16px 20px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14,marginBottom:24,boxShadow:`0 8px 24px rgba(5,150,105,0.25)`}}>
+          <div style={{fontSize:30}}>💪</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#fff",marginBottom:2,letterSpacing:"-0.3px"}}>Muscles travaillés</div>
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.6)"}}>Silhouette interactive · groupes sollicités par séance</div>
+          </div>
+          <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"5px 10px",fontSize:11,color:"#fff",fontWeight:700,flexShrink:0}}>Voir →</div>
+        </button>
+
         {/* Sports rapide */}
         <div style={{marginBottom:8}}>
           <div style={{fontSize:11,color:C.t4,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",marginBottom:12}}>Accès rapide par sport</div>
@@ -3170,6 +3245,7 @@ export default function App() {
   const [showPrep,setShowPrep]=useState(false);
   const [showWeight,setShowWeight]=useState(false);
   const [showHIIT,setShowHIIT]=useState(false);
+  const [showMuscles,setShowMuscles]=useState(false);
   const [logData,setLogData]=useState({});
   const [loading,setLoading]=useState(true);
   const [screen,setScreen]=useState("loading"); // loading|form|chat
@@ -3333,6 +3409,7 @@ export default function App() {
       {showHIIT&&<HIITPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowHIIT(false)}/>}
       {showWeight&&<BodyWeightTracker onClose={()=>setShowWeight(false)}/>}
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
+      {showMuscles&&<MuscleScreen profile={profile} onClose={()=>setShowMuscles(false)}/>}
       {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send}/>}
 
       {/* Main content - no old header */}
@@ -3375,6 +3452,7 @@ export default function App() {
               onNutrition={()=>setShowNutrition(true)}
               onProfil={()=>setScreen("form")}
               onWeight={()=>setShowWeight(true)}
+              onMuscles={()=>setShowMuscles(true)}
             />
           )}
           {!homeScreen&&msgs.map((m,i)=><Bubble key={i} msg={m} profile={profile} firstName={firstName} logData={logData} onLogSet={handleLogSet}/>)}
