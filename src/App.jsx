@@ -2079,112 +2079,232 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
 }
 function NutritionDisplay({text}) {
   if (!text) return null;
-  
-  // Parse and render the nutrition plan cleanly
+
+  // Rendu markdown léger, thème sombre
   const lines = text.split(String.fromCharCode(10));
   const elements = [];
   let i = 0;
-  
+
   while (i < lines.length) {
     const line = lines[i].trim();
     if (!line || line === '---' || line === '***') { i++; continue; }
-    
-    // H1/H2/H3
+
     if (line.startsWith('### ')) {
       elements.push(
-        <div key={i} style={{fontSize:12,fontWeight:800,color:"#1f2937",textTransform:"uppercase",letterSpacing:".08em",marginTop:16,marginBottom:8,borderBottom:"2px solid #e8eaed",paddingBottom:4}}>
+        <div key={i} style={{fontSize:12,fontWeight:800,color:C.t1,textTransform:"uppercase",letterSpacing:".08em",marginTop:16,marginBottom:8,borderBottom:`2px solid ${C.bord}`,paddingBottom:4}}>
           {line.replace(/^#+\s*/,'')}
         </div>
       );
     } else if (line.startsWith('## ')) {
       elements.push(
-        <div key={i} style={{fontSize:14,fontWeight:800,color:"#1f2937",marginTop:20,marginBottom:8}}>
+        <div key={i} style={{fontSize:14,fontWeight:800,color:C.t1,marginTop:20,marginBottom:8}}>
           {line.replace(/^#+\s*/,'')}
         </div>
       );
     } else if (line.startsWith('# ')) {
       elements.push(
-        <div key={i} style={{fontSize:16,fontWeight:900,color:"#0f1117",marginBottom:12}}>
+        <div key={i} style={{fontSize:16,fontWeight:900,color:C.t1,marginBottom:12}}>
           {line.replace(/^#+\s*/,'')}
         </div>
       );
-    // Table rows
     } else if (line.startsWith('|') && line.endsWith('|')) {
-      if (line.includes('---')) { i++; continue; } // skip separator
+      if (line.includes('---')) { i++; continue; }
       const cells = line.split('|').filter(c=>c.trim());
-      const isHeader = i > 0 && lines[i-1]?.trim() === '' || elements.length === 0;
       elements.push(
         <div key={i} style={{display:"grid",gridTemplateColumns:`repeat(${cells.length},1fr)`,gap:1,marginBottom:1}}>
           {cells.map((c,j)=>(
-            <div key={j} style={{background:j===0?"#f4f5f8":"#ffffff",padding:"7px 10px",fontSize:12,color:"#374151",fontWeight:j===0?600:400,borderRadius:j===0?"6px 0 0 6px":j===cells.length-1?"0 6px 6px 0":0,border:"1px solid #e8eaed"}}>
+            <div key={j} style={{background:j===0?C.surfHigh:C.bg,padding:"7px 10px",fontSize:12,color:C.t2,fontWeight:j===0?600:400,borderRadius:j===0?"6px 0 0 6px":j===cells.length-1?"0 6px 6px 0":0,border:`1px solid ${C.bord}`}}>
               {c.trim().replace(/\*\*/g,'')}
             </div>
           ))}
         </div>
       );
-    // Bullet points
     } else if (line.startsWith('- ') || line.startsWith('• ')) {
       elements.push(
         <div key={i} style={{display:"flex",gap:8,marginBottom:4}}>
-          <span style={{color:"#3b6ff0",fontWeight:700,flexShrink:0}}>›</span>
-          <span style={{fontSize:13,color:"#374151",lineHeight:1.5}}>{line.replace(/^[-•]\s*/,'').replace(/\*\*/g,'')}</span>
+          <span style={{color:C.green,fontWeight:700,flexShrink:0}}>›</span>
+          <span style={{fontSize:13,color:C.t2,lineHeight:1.5}}>{line.replace(/^[-•]\s*/,'').replace(/\*\*/g,'')}</span>
         </div>
       );
-    // Bold text
     } else if (line.includes('**')) {
       elements.push(
-        <p key={i} style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:"4px 0"}}
-          dangerouslySetInnerHTML={{__html:line.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')}}/> 
+        <p key={i} style={{fontSize:13,color:C.t2,lineHeight:1.6,margin:"4px 0"}}
+          dangerouslySetInnerHTML={{__html:line.replace(/\*\*([^*]+)\*\*/g,'<strong style="color:#f9fafb">$1</strong>')}}/>
       );
-    // Regular text
     } else if (line.length > 0) {
       elements.push(
-        <p key={i} style={{fontSize:13,color:"#374151",lineHeight:1.6,margin:"3px 0"}}>{line}</p>
+        <p key={i} style={{fontSize:13,color:C.t2,lineHeight:1.6,margin:"3px 0"}}>{line}</p>
       );
     }
     i++;
   }
-  
+
+  return <div>{elements}</div>;
+}
+
+// ── Barres de macros réutilisables ──
+function MacroBars({ macros, compact }) {
+  const kcal = Math.round(macros?.kcal || 0);
+  const P = Math.round(macros?.prot || 0), G = Math.round(macros?.gluc || 0), L = Math.round(macros?.lip || 0);
+  const kP = P*4, kG = G*4, kL = L*9, tot = kP + kG + kL || 1;
+  const rows = [["Protéines",P,kP,C.green],["Glucides",G,kG,C.blue],["Lipides",L,kL,C.orange]];
   return (
-    <div style={{background:"#ffffff",borderRadius:14,padding:16,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
-      {elements}
+    <div>
+      <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:compact?6:10}}>
+        <span style={{fontSize:compact?18:22,fontWeight:900,color:C.t1}}>{kcal}</span>
+        <span style={{fontSize:11,color:C.t3,fontWeight:700}}>kcal</span>
+      </div>
+      {rows.map(([l,g,k,c])=>{
+        const pct = Math.round(k/tot*100);
+        return (
+          <div key={l} style={{marginBottom:compact?5:7}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+              <span style={{color:C.t2,fontWeight:600}}>{l}</span>
+              <span style={{color:C.t3}}>{g} g · {pct}%</span>
+            </div>
+            <div style={{height:6,background:"rgba(255,255,255,0.08)",borderRadius:4,overflow:"hidden"}}>
+              <div style={{width:pct+"%",height:"100%",background:c,borderRadius:4}}/>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
+// ── Carte recette ──
+function RecipeCard({ recipe, lib, isSaved, onSave, onDelete }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:14,marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:15,fontWeight:800,color:C.t1,marginBottom:3}}>{recipe.nom}</div>
+          <div style={{fontSize:11,color:C.t3}}>
+            {recipe.temps?`⏱ ${recipe.temps}`:""}{recipe.temps&&recipe.portions?"  ·  ":""}{recipe.portions?`🍽 ${recipe.portions}`:""}
+          </div>
+        </div>
+        {lib ? (
+          <button onClick={()=>onDelete(recipe)} title="Retirer" style={{background:"rgba(239,68,68,0.12)",border:`1px solid ${C.red}55`,borderRadius:8,padding:"6px 9px",color:C.red,fontSize:13,cursor:"pointer",flexShrink:0}}>🗑</button>
+        ) : (
+          <button onClick={()=>onSave(recipe)} disabled={isSaved} title="Sauver" style={{background:isSaved?"rgba(255,255,255,0.05)":"rgba(16,185,129,0.12)",border:`1px solid ${isSaved?C.bord:C.green+"55"}`,borderRadius:8,padding:"6px 10px",color:isSaved?C.t3:C.green,fontSize:12,fontWeight:700,cursor:isSaved?"default":"pointer",flexShrink:0}}>{isSaved?"✓ Sauvé":"♥ Sauver"}</button>
+        )}
+      </div>
+      <div style={{background:C.bg,borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+        <MacroBars macros={recipe.macros||{}} compact/>
+      </div>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"rgba(255,255,255,0.04)",border:`1px solid ${C.bord}`,borderRadius:9,padding:"8px",color:C.t2,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+        {open?"Masquer ▲":"Ingrédients & préparation ▼"}
+      </button>
+      {open && (
+        <div style={{marginTop:12}}>
+          {Array.isArray(recipe.ingredients) && recipe.ingredients.length>0 && (
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Ingrédients</div>
+              {recipe.ingredients.map((ing,j)=>(
+                <div key={j} style={{display:"flex",gap:8,marginBottom:3,fontSize:13,color:C.t2}}>
+                  <span style={{color:C.green}}>›</span>
+                  <span>{typeof ing==="string"?ing:`${ing.qte||ing.quantite||""} ${ing.nom||""}`.trim()}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {Array.isArray(recipe.etapes) && recipe.etapes.length>0 && (
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Préparation</div>
+              {recipe.etapes.map((st,j)=>(
+                <div key={j} style={{display:"flex",gap:9,marginBottom:6}}>
+                  <span style={{width:20,height:20,borderRadius:"50%",background:"rgba(16,185,129,0.15)",color:C.green,fontSize:11,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{j+1}</span>
+                  <span style={{fontSize:13,color:C.t2,lineHeight:1.5}}>{st}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Parse JSON recettes (tolérant) ──
+function parseRecipes(text) {
+  if (!text) return null;
+  let t = String(text).trim().replace(/```json/gi,"").replace(/```/g,"").trim();
+  const a = t.indexOf("["), b = t.lastIndexOf("]");
+  if (a>=0 && b>a) t = t.slice(a,b+1);
+  try { const arr = JSON.parse(t); return Array.isArray(arr) ? arr.filter(r=>r&&r.nom) : null; }
+  catch { return null; }
+}
 
 // ─── NUTRITION PANEL ──────────────────────────────────────────────────────────
 function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
-  const [mode, setMode] = useState("frigo"); // frigo | courses | semaine
+  const [mode, setMode] = useState("recettes"); // recettes | frigo | courses | semaine | mesrecettes
   const [ingredients, setIngredients] = useState("");
-  const [budget, setBudget] = useState("");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(null);   // texte (modes frigo/courses/semaine)
+  const [recipes, setRecipes] = useState(null);  // tableau (mode recettes)
+  const [parseFail, setParseFail] = useState(false);
+  const [saved, setSaved] = useState([]);
+
+  useEffect(() => {
+    try { setSaved(JSON.parse(localStorage.getItem("coach_recipes") || "[]")); } catch {}
+  }, []);
 
   const imc = profile ? (profile.weight/((profile.height/100)**2)).toFixed(1) : "?";
+  const cals = profile ? Math.round(
+    (profile.gender === "femme"
+      ? (10*profile.weight + 6.25*profile.height - 5*profile.age - 161)
+      : (10*profile.weight + 6.25*profile.height - 5*profile.age + 5)) * 1.55
+  ) : 2000;
+  const prot = profile ? Math.round(profile.weight * 2) : 150;
 
   const modeLabels = {
-    frigo: { icon:"🧊", label:"J'ai dans mon frigo", placeholder:"Ex: poulet, riz, courgettes, oeufs, fromage blanc..." },
-    courses: { icon:"🛒", label:"Je vais faire les courses", placeholder:"Ex: budget 50€, j'aime le poulet et le poisson..." },
-    semaine: { icon:"📅", label:"Plan semaine complet", placeholder:"Contraintes, allergies, préférences..." },
+    recettes:    { icon:"🍳", label:"Recettes", placeholder:"Ex: 4 recettes riches en protéines pour le dîner, rapides, sans lactose..." },
+    frigo:       { icon:"🧊", label:"Mon frigo", placeholder:"Ex: poulet, riz, courgettes, oeufs, fromage blanc..." },
+    courses:     { icon:"🛒", label:"Courses", placeholder:"Ex: budget 50€, j'aime le poulet et le poisson..." },
+    semaine:     { icon:"📅", label:"Plan semaine", placeholder:"Contraintes, allergies, préférences..." },
+    mesrecettes: { icon:"♥", label:"Mes recettes" },
+  };
+  const isLib = mode === "mesrecettes";
+
+  const saveRecipe = (r) => {
+    if (saved.some(x=>x.nom===r.nom)) return;
+    const next = [r, ...saved].slice(0,100);
+    setSaved(next);
+    try { localStorage.setItem("coach_recipes", JSON.stringify(next)); } catch {}
+  };
+  const delRecipe = (r) => {
+    const next = saved.filter(x=>x.nom!==r.nom);
+    setSaved(next);
+    try { localStorage.setItem("coach_recipes", JSON.stringify(next)); } catch {}
   };
 
   const generate = async () => {
-    setLoading(true); setResult(null);
-    const modeLabel = modeLabels[mode].label;
-    const cals = profile ? Math.round(
-      profile.gender === "femme"
-        ? (10*profile.weight + 6.25*profile.height - 5*profile.age - 161) * 1.55
-        : (10*profile.weight + 6.25*profile.height - 5*profile.age + 5) * 1.55
-    ) : 2000;
-    const prot = profile ? Math.round(profile.weight * 2) : 150;
+    setLoading(true); setResult(null); setRecipes(null); setParseFail(false);
+
+    if (mode === "recettes") {
+      const prompt = `Génère 4 recettes pour ${firstName}, adaptées à l'objectif "${profile?.goal||"forme"}", ~${cals} kcal/jour et ${prot}g de protéines/jour. Demande spécifique : ${ingredients || "recettes équilibrées et variées"}. Réponds STRICTEMENT en JSON valide : un tableau d'objets, chaque objet = {"nom":string,"temps":string,"portions":string,"macros":{"kcal":number,"prot":number,"gluc":number,"lip":number},"ingredients":[string],"etapes":[string]}. Les macros sont PAR PORTION. Aucun texte hors du JSON.`;
+      try {
+        const r = await fetch(API+"/api/coach", {
+          method:"POST",
+          headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
+          body:JSON.stringify({system:"Tu es un nutritionniste expert. Réponds UNIQUEMENT en JSON valide, sans markdown, sans texte autour.",messages:[{role:"user",content:prompt}],max_tokens:2000})
+        });
+        const data = await r.json();
+        const text = data.content?.[0]?.text || "";
+        const parsed = parseRecipes(text);
+        if (parsed && parsed.length) setRecipes(parsed);
+        else { setParseFail(true); setResult(text || "Erreur de génération"); }
+      } catch(e) { setResult("Erreur : " + e.message); }
+      setLoading(false);
+      return;
+    }
 
     const prompt = mode === "frigo"
       ? `En tant que nutritionniste expert, génère 3 repas équilibrés pour ${firstName} en utilisant ces ingrédients disponibles : ${ingredients}. Profil : ${profile?.goal}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${cals} kcal/jour et ${prot}g de protéines. Pour chaque repas : nom, ingrédients et quantités précises, valeurs nutritionnelles (kcal, protéines, glucides, lipides), temps de préparation et instructions simples.`
       : mode === "courses"
-      ? `Génère une liste de courses pour une semaine pour ${firstName}. Profil : ${profile?.goal}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${cals} kcal/jour et ${prot}g de protéines/jour. Contraintes/préférences : ${ingredients || budget || "aucune"}. Inclus : liste de courses organisée par rayon, 5 repas types avec recettes simples, macros journaliers moyens.`
+      ? `Génère une liste de courses pour une semaine pour ${firstName}. Profil : ${profile?.goal}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${cals} kcal/jour et ${prot}g de protéines/jour. Contraintes/préférences : ${ingredients || "aucune"}. Inclus : liste de courses organisée par rayon, 5 repas types avec recettes simples, macros journaliers moyens.`
       : `Génère un plan de repas complet pour la semaine pour ${firstName}. Profil : ${profile?.goal}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${cals} kcal/jour et ${prot}g de protéines. Notes : ${ingredients || "aucune"}. Inclus : 7 jours de repas (petit-déjeuner, déjeuner, dîner, collation), macros par jour, liste de courses.`;
-
     try {
       const r = await fetch(API+"/api/coach", {
         method:"POST",
@@ -2192,19 +2312,14 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
         body:JSON.stringify({system:`Tu es un nutritionniste expert. Réponds en français de façon claire et pratique. Structure bien avec des sections. Adapte toujours à l'objectif sportif de l'utilisateur.`,messages:[{role:"user",content:prompt}],max_tokens:1500})
       });
       const data = await r.json();
-      const text = data.content?.[0]?.text || "Erreur de génération";
-      setResult(text);
-    } catch(e) {
-      setResult("Erreur : " + e.message);
-    }
+      setResult(data.content?.[0]?.text || "Erreur de génération");
+    } catch(e) { setResult("Erreur : " + e.message); }
     setLoading(false);
   };
 
   const sendChat = () => {
-    if (result) {
-      sendToChat("Voici mon plan nutrition : " + result.slice(0, 200) + "... Comment l'adapter à mon programme sportif ?");
-      onClose();
-    }
+    const summary = recipes ? recipes.map(r=>r.nom).join(", ") : (result||"").slice(0,200);
+    if (summary) { sendToChat("Voici mes recettes : " + summary + "... Comment les intégrer à mon programme ?"); onClose(); }
   };
 
   return (
@@ -2218,26 +2333,23 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
       </div>
 
       <div style={{flex:1,overflowY:"scroll",padding:"16px",WebkitOverflowScrolling:"touch"}}>
-        {/* Mode selector */}
+        {/* Sélecteur de mode */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
           {Object.entries(modeLabels).map(([k,v])=>(
-            <button key={k} onClick={()=>{setMode(k);setResult(null);}} style={{background:mode===k?C.green+"18":C.surf,border:`1.5px solid ${mode===k?C.green:C.bord}`,borderRadius:11,padding:"10px 8px",cursor:"pointer",textAlign:"center"}}>
+            <button key={k} onClick={()=>{setMode(k);setResult(null);setRecipes(null);setParseFail(false);}} style={{background:mode===k?C.green+"18":C.surf,border:`1.5px solid ${mode===k?C.green:C.bord}`,borderRadius:11,padding:"10px 8px",cursor:"pointer",textAlign:"center",position:"relative"}}>
               <div style={{fontSize:20,marginBottom:4}}>{v.icon}</div>
               <div style={{fontSize:10,fontWeight:700,color:mode===k?C.green:C.t2,lineHeight:1.3}}>{v.label}</div>
+              {k==="mesrecettes" && saved.length>0 && <div style={{position:"absolute",top:6,right:6,minWidth:16,height:16,padding:"0 4px",background:C.green,borderRadius:8,color:"#fff",fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center"}}>{saved.length}</div>}
             </button>
           ))}
         </div>
 
-        {/* Macros recap */}
-        {profile && (
+        {/* Objectifs */}
+        {profile && !isLib && (
           <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:11,padding:"12px",marginBottom:14}}>
             <div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Tes objectifs nutritionnels</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-              {[
-                ["Calories cible", Math.round((profile.gender==="femme"?(10*profile.weight+6.25*profile.height-5*profile.age-161):(10*profile.weight+6.25*profile.height-5*profile.age+5))*1.55)+" kcal", C.blue],
-                ["Protéines", Math.round(profile.weight*2)+"g/j", C.green],
-                ["Objectif", profile.goal, C.orange],
-              ].map(([l,v,c])=>(
+              {[["Calories cible",cals+" kcal",C.blue],["Protéines",prot+"g/j",C.green],["Objectif",profile.goal,C.orange]].map(([l,v,c])=>(
                 <div key={l} style={{background:C.bg,borderRadius:9,padding:"8px",textAlign:"center"}}>
                   <div style={{fontSize:13,fontWeight:800,color:c}}>{v}</div>
                   <div style={{fontSize:9,color:C.t3,marginTop:2}}>{l}</div>
@@ -2247,20 +2359,36 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
           </div>
         )}
 
-        {/* Input */}
-        <div style={{marginBottom:14}}>
-          <div style={{fontSize:12,color:C.t3,marginBottom:6}}>{modeLabels[mode].label}</div>
-          <textarea value={ingredients} onChange={e=>setIngredients(e.target.value)}
-            placeholder={modeLabels[mode].placeholder}
-            style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:9,padding:"10px 12px",color:C.t1,fontSize:13,resize:"vertical",minHeight:90,fontFamily:"inherit",boxSizing:"border-box"}}/>
-        </div>
+        {/* Générateur */}
+        {!isLib && (
+          <>
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:12,color:C.t3,marginBottom:6}}>{modeLabels[mode].label}</div>
+              <textarea value={ingredients} onChange={e=>setIngredients(e.target.value)}
+                placeholder={modeLabels[mode].placeholder}
+                style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:9,padding:"10px 12px",color:C.t1,fontSize:13,resize:"vertical",minHeight:90,fontFamily:"inherit",boxSizing:"border-box"}}/>
+            </div>
+            <button onClick={generate} disabled={loading} style={{width:"100%",padding:"13px",background:loading?C.high:C.green,border:"none",borderRadius:11,color:"#fff",fontWeight:700,fontSize:14,cursor:loading?"not-allowed":"pointer",marginBottom:16}}>
+              {loading?"⏳ Génération en cours...":(mode==="recettes"?"🍳 Générer des recettes":"🍽️ Générer mes repas")}
+            </button>
+          </>
+        )}
 
-        <button onClick={generate} disabled={loading} style={{width:"100%",padding:"13px",background:loading?C.high:C.green,border:"none",borderRadius:11,color:"#fff",fontWeight:700,fontSize:14,cursor:loading?"not-allowed":"pointer",marginBottom:16}}>
-          {loading?"⏳ Génération en cours...":"🍽️ Générer mes repas"}
-        </button>
+        {/* Résultats — mode recettes : cartes */}
+        {mode==="recettes" && recipes && (
+          <div>
+            {recipes.map((r,i)=><RecipeCard key={i} recipe={r} isSaved={saved.some(x=>x.nom===r.nom)} onSave={saveRecipe}/>)}
+          </div>
+        )}
+        {mode==="recettes" && parseFail && result && (
+          <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:14,marginBottom:12}}>
+            <div style={{fontSize:11,color:C.orange,fontWeight:700,marginBottom:8}}>Format inattendu — affichage brut :</div>
+            <NutritionDisplay text={result}/>
+          </div>
+        )}
 
-        {/* Result */}
-        {result && (
+        {/* Résultats — modes texte */}
+        {mode!=="recettes" && !isLib && result && (
           <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:14,marginBottom:12}}>
             <div style={{fontSize:10,color:C.green,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Ton plan nutrition</div>
             <NutritionDisplay text={result}/>
@@ -2268,6 +2396,22 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
               💬 Discuter avec mon coach
             </button>
           </div>
+        )}
+
+        {/* Bibliothèque */}
+        {isLib && (
+          saved.length>0 ? (
+            <div>
+              <div style={{fontSize:11,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>{saved.length} recette{saved.length>1?"s":""} sauvegardée{saved.length>1?"s":""}</div>
+              {saved.map((r,i)=><RecipeCard key={i} recipe={r} lib onDelete={delRecipe}/>)}
+            </div>
+          ) : (
+            <div style={{textAlign:"center",padding:"48px 20px"}}>
+              <div style={{fontSize:44,marginBottom:12}}>♥</div>
+              <div style={{fontSize:14,fontWeight:700,color:C.t2,marginBottom:6}}>Aucune recette sauvegardée</div>
+              <div style={{fontSize:13,color:C.t4}}>Génère des recettes puis touche « ♥ Sauver » pour les retrouver ici.</div>
+            </div>
+          )
         )}
       </div>
     </div>
