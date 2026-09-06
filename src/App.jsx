@@ -1197,6 +1197,7 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
   const [duree, setDuree] = useState(30);
   const [objectif, setObjectif] = useState("");
   const [equip, setEquip] = useState(profile?.equip ? [profile.equip] : ["Poids du corps"]);
+  const [todayAdj, setTodayAdj] = useState(null);
   const [resumeData, setResumeData] = useState(null);
   const [seanceData, setSeanceData] = useState(null);
   const [phase, setPhase] = useState("warmup");
@@ -1208,6 +1209,18 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
   const [sessionLog, setSessionLog] = useState([]);
   const [seanceStart, setSeanceStart] = useState(null);
   const [rating, setRating] = useState(null); // [{name, sets:[{weight,reps}]}]
+
+  useEffect(() => {
+    try {
+      const a = JSON.parse(localStorage.getItem("coach_today_adjust") || "null");
+      const today = new Date().toISOString().split("T")[0];
+      if (a && a.date === today && (a.time || a.equip)) {
+        setTodayAdj(a);
+        if (a.equip) setEquip([a.equip]);
+        if (a.time) setDuree(a.time);
+      }
+    } catch {}
+  }, []);
 
   // Load saved weights on mount
   useEffect(() => {
@@ -1506,7 +1519,7 @@ RÈGLES DE PROGRESSION :
     const prompt = `Tu es un coach sportif expert. Génère une séance unique pour ${firstName}.
 DURÉE TOTALE STRICTE : ${duree} min = échauffement ${warmupMins2} min + séance ${mainMins2} min + retour au calme ${cooldownMins2} min.
 Ne pas dépasser ${duree} min. Pour ${mainMins2} min de séance principale : musculation ${Math.max(3,Math.floor(mainMins2/8))} exercices (8min/exercice : 3 séries + repos + installation). Respecter strictement ce nombre.par exercice avec repos). Ne pas depasser cette limite.
-Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}
+Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}${todayAdj?" | AJUSTEMENT DU JOUR (ponctuel) : respecter STRICTEMENT la durée et le matériel indiqués, c'est une contrainte du jour.":""}
 ${profile ? `Niveau : ${profile.level} | Age : ${profile.age} ans` : ""}
 ${historyContext}
 
@@ -1710,6 +1723,11 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
             </div>
           </div>
 
+          {todayAdj&&(
+            <div style={{background:"rgba(16,185,129,0.12)",border:`1px solid ${C.green}55`,borderRadius:11,padding:"10px 13px",marginBottom:16,fontSize:12,color:"#6ee7b7",lineHeight:1.45}}>
+              🔧 Ajustement du jour appliqué{todayAdj.time?` · ${todayAdj.time} min`:""}{todayAdj.equip?` · ${todayAdj.equip}`:""}. Le coach en tient compte pour cette séance.
+            </div>
+          )}
           {/* Équipement - multi-select + custom */}
           {/* Équipement — affiché uniquement si pertinent */}
           {(()=>{
@@ -3388,6 +3406,8 @@ export default function App() {
   const [busy,setBusy]=useState(false);
   const [week,setWeek]=useState(1);
   const [showEquip,setShowEquip]=useState(false);
+  const [todayTime,setTodayTime]=useState(null);
+  const [todayEquip,setTodayEquip]=useState(null);
   const [equipOverride,setEquipOverride]=useState(null);
   const [showJournal,setShowJournal]=useState(false);
   const [showNutrition,setShowNutrition]=useState(false);
@@ -3613,7 +3633,7 @@ export default function App() {
           {!homeScreen&&(
             <div style={{position:"sticky",top:0,zIndex:20,background:C.bg,borderBottom:`1px solid ${C.bord}`,padding:"10px 12px",display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <button onClick={()=>setHomeScreen(true)} style={{background:C.surfHigh,border:`1px solid ${C.bord}`,borderRadius:9,padding:"8px 13px",color:C.t1,fontSize:13,fontWeight:700,cursor:"pointer"}}>← Accueil</button>
-              <button onClick={()=>setShowEquip(true)} style={{marginLeft:"auto",background:"rgba(59,111,240,0.15)",border:`1px solid ${C.blue}55`,borderRadius:9,padding:"8px 13px",color:"#93b4ff",fontSize:13,fontWeight:700,cursor:"pointer"}}>🎛 Matériel du jour</button>
+              <button onClick={()=>setShowEquip(true)} style={{marginLeft:"auto",background:"rgba(59,111,240,0.15)",border:`1px solid ${C.blue}55`,borderRadius:9,padding:"8px 13px",color:"#93b4ff",fontSize:13,fontWeight:700,cursor:"pointer"}}>🔧 Adapter aujourd'hui</button>
             </div>
           )}
           {!homeScreen&&msgs.map((m,i)=><Bubble key={i} msg={m} profile={profile} firstName={firstName} logData={logData} onLogSet={handleLogSet}/>)}
@@ -3627,16 +3647,42 @@ export default function App() {
       {/* Equip panel */}
       {showEquip&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"flex-end"}} onClick={()=>setShowEquip(false)}>
-          <div style={{width:"100%",background:"rgba(255,255,255,0.06)",borderRadius:"17px 17px 0 0",padding:"20px 15px 28px"}} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:14,fontWeight:800,color:C.t1,marginBottom:3}}>Équipement cette semaine</div>
-            <div style={{fontSize:11,color:C.t3,marginBottom:14}}>Le coach adapte toutes tes séances en conséquence</div>
-            {equipOpts.map(o=>(
-              <button key={String(o.id)} onClick={()=>{setShowEquip(false);setEquipOverride(o.id);send(o.id?`Je n'ai accès qu'à : ${o.id}. Adapte toutes mes séances.`:`Reviens à mon équipement habituel : ${profile.equip}.`);}}
-                style={{background:equipOverride===o.id?C.blue+"18":C.bg,border:`1.5px solid ${equipOverride===o.id?C.blue:C.bord}`,borderRadius:10,padding:"11px 13px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,marginBottom:6,width:"100%",color:C.t1,fontSize:13,fontWeight:600}}>
-                <span style={{fontSize:17}}>{o.icon}</span>{o.label}
-                {equipOverride===o.id&&<span style={{marginLeft:"auto",fontSize:11,color:C.blue,fontWeight:700}}>Actif ✓</span>}
-              </button>
-            ))}
+          <div style={{width:"100%",maxWidth:680,margin:"0 auto",background:C.surfHigh,borderRadius:"17px 17px 0 0",padding:"20px 15px 28px",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:15,fontWeight:800,color:C.t1,marginBottom:3}}>Adapter la séance du jour</div>
+            <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.45}}>Moins de temps ou pas le bon matériel aujourd'hui ? Le coach adapte la séance du jour et rééquilibre les suivantes, sans changer ton objectif.</div>
+
+            <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>⏱ Temps dispo aujourd'hui</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
+              {[[null,"Comme prévu"],[20,"20 min"],[30,"30 min"],[45,"45 min"],[60,"1 h"]].map(([v,l])=>(
+                <button key={String(v)} onClick={()=>setTodayTime(v)} style={{flex:"1 0 28%",padding:"9px",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:700,
+                  background:todayTime===v?C.green+"22":C.bg,border:`1.5px solid ${todayTime===v?C.green:C.bord}`,color:todayTime===v?"#6ee7b7":C.t2}}>{l}</button>
+              ))}
+            </div>
+
+            <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>🏋️ Matériel dispo aujourd'hui</div>
+            <div style={{marginBottom:18}}>
+              {equipOpts.map(o=>(
+                <button key={String(o.id)} onClick={()=>setTodayEquip(o.id)}
+                  style={{background:todayEquip===o.id?C.blue+"18":C.bg,border:`1.5px solid ${todayEquip===o.id?C.blue:C.bord}`,borderRadius:10,padding:"11px 13px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,marginBottom:6,width:"100%",color:C.t1,fontSize:13,fontWeight:600}}>
+                  <span style={{fontSize:17}}>{o.icon}</span>{o.label}
+                  {todayEquip===o.id&&<span style={{marginLeft:"auto",fontSize:11,color:C.blue,fontWeight:700}}>✓</span>}
+                </button>
+              ))}
+            </div>
+
+            <button onClick={()=>{
+              setShowEquip(false);
+              const parts=[];
+              if(todayTime) parts.push(`je n'ai que ${todayTime} min aujourd'hui`);
+              if(todayEquip) parts.push(`je n'ai accès qu'à : ${todayEquip}`);
+              setEquipOverride(todayEquip);
+              try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:todayTime,equip:todayEquip}));}catch{}
+              const cons=parts.length?parts.join(" et "):"des conditions inhabituelles aujourd'hui";
+              setHomeScreen(false);
+              send(`Ajustement ponctuel pour aujourd'hui uniquement : ${cons}. 1) Donne-moi ma séance du jour adaptée précisément à ces contraintes. 2) Rééquilibre mes prochaines séances de la semaine pour rester aligné avec mon objectif global (${profile.goal}). C'est un ajustement temporaire : ne modifie pas la structure d'ensemble du programme.`);
+            }} style={{width:"100%",padding:"13px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
+              Adapter et rééquilibrer →
+            </button>
           </div>
         </div>
       )}
