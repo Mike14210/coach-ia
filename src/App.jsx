@@ -2284,12 +2284,60 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
 
   const modeLabels = {
     recettes:    { icon:"🍳", label:"Recettes", placeholder:"Ex: 4 recettes riches en protéines pour le dîner, rapides, sans lactose..." },
+    compteur:    { icon:"📸", label:"Compteur", placeholder:"Ex: 200g de poulet grillé, 150g de riz, une salade verte avec huile d'olive..." },
     frigo:       { icon:"🧊", label:"Mon frigo", placeholder:"Ex: poulet, riz, courgettes, oeufs, fromage blanc..." },
     courses:     { icon:"🛒", label:"Courses", placeholder:"Ex: budget 50€, j'aime le poulet et le poisson..." },
     semaine:     { icon:"📅", label:"Plan semaine", placeholder:"Contraintes, allergies, préférences..." },
     mesrecettes: { icon:"♥", label:"Mes recettes" },
   };
   const isLib = mode === "mesrecettes";
+  const isCompteur = mode === "compteur";
+  const [photoB64, setPhotoB64] = useState(null);
+  const [compteurResult, setCompteurResult] = useState(null);
+  const photoRef = useRef(null);
+
+  const handlePhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const b64 = reader.result.split(",")[1];
+      setPhotoB64({ data: b64, type: file.type || "image/jpeg", preview: reader.result });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const analyzeCompteur = async () => {
+    setLoading(true); setCompteurResult(null);
+    const sysMsg = "Tu es un nutritionniste expert. Analyse ce repas et réponds UNIQUEMENT en JSON valide : {\"aliments\":[{\"nom\":string,\"quantite\":string,\"kcal\":number,\"prot\":number,\"gluc\":number,\"lip\":number}],\"total\":{\"kcal\":number,\"prot\":number,\"gluc\":number,\"lip\":number}}. Aucun texte hors du JSON.";
+    let userContent;
+    if (photoB64) {
+      userContent = [
+        { type:"image", source:{ type:"base64", media_type: photoB64.type, data: photoB64.data } },
+        { type:"text", text:"Analyse précisément cette assiette / ce repas. Estime les quantités visuellement et calcule les calories et macros de chaque aliment visible." }
+      ];
+    } else {
+      userContent = `Calcule précisément les calories et macros de ce repas : ${ingredients}. Estime les quantités si elles ne sont pas indiquées.`;
+    }
+    try {
+      const r = await fetch(API+"/api/coach", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
+        body:JSON.stringify({ system:sysMsg, messages:[{role:"user", content:userContent}], max_tokens:1500 })
+      });
+      const data = await r.json();
+      const text = data.content?.[0]?.text || "";
+      let t = text.trim().replace(/```json/gi,"").replace(/```/g,"").trim();
+      const a = t.indexOf("{"), b = t.lastIndexOf("}");
+      if (a>=0 && b>a) t = t.slice(a,b+1);
+      try {
+        const parsed = JSON.parse(t);
+        if (parsed && parsed.total) setCompteurResult(parsed);
+        else setCompteurResult({ error: text });
+      } catch { setCompteurResult({ error: text || "Erreur d'analyse" }); }
+    } catch(e) { setCompteurResult({ error: "Erreur : "+e.message }); }
+    setLoading(false);
+  };
 
   const saveRecipe = (r) => {
     if (saved.some(x=>x.nom===r.nom)) return;
@@ -2385,7 +2433,7 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
         )}
 
         {/* Générateur */}
-        {!isLib && (
+        {!isLib && !isCompteur && (
           <>
             <div style={{marginBottom:14}}>
               <div style={{fontSize:12,color:C.t3,marginBottom:6}}>{modeLabels[mode].label}</div>
@@ -2409,6 +2457,76 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
           <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:14,marginBottom:12}}>
             <div style={{fontSize:11,color:C.orange,fontWeight:700,marginBottom:8}}>Format inattendu — affichage brut :</div>
             <NutritionDisplay text={result}/>
+          </div>
+        )}
+
+        {/* Compteur de calories */}
+        {isCompteur && (
+          <div>
+            <input type="file" accept="image/*" capture="environment" ref={photoRef} onChange={handlePhoto} style={{display:"none"}}/>
+
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              <button onClick={()=>photoRef.current?.click()} style={{flex:1,padding:"14px",background:"rgba(16,185,129,0.12)",border:`1.5px solid ${C.green}55`,borderRadius:12,cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:24,marginBottom:4}}>📷</div>
+                <div style={{fontSize:12,fontWeight:700,color:C.green}}>Prendre en photo</div>
+              </button>
+              <button onClick={()=>{setPhotoB64(null);}} style={{flex:1,padding:"14px",background:!photoB64?"rgba(59,111,240,0.12)":"rgba(255,255,255,0.04)",border:`1.5px solid ${!photoB64?C.blue+"55":C.bord}`,borderRadius:12,cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:24,marginBottom:4}}>✏️</div>
+                <div style={{fontSize:12,fontWeight:700,color:!photoB64?"#93b4ff":C.t3}}>Décrire mon repas</div>
+              </button>
+            </div>
+
+            {photoB64 && (
+              <div style={{marginBottom:14,borderRadius:12,overflow:"hidden",border:`1px solid ${C.bord}`}}>
+                <img src={photoB64.preview} alt="Repas" style={{width:"100%",display:"block",maxHeight:280,objectFit:"cover"}}/>
+                <button onClick={()=>setPhotoB64(null)} style={{width:"100%",padding:"8px",background:C.surfHigh,border:"none",color:C.t3,fontSize:11,cursor:"pointer"}}>✕ Supprimer la photo</button>
+              </div>
+            )}
+
+            {!photoB64 && (
+              <div style={{marginBottom:14}}>
+                <textarea value={ingredients} onChange={e=>setIngredients(e.target.value)}
+                  placeholder={modeLabels.compteur.placeholder}
+                  style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:9,padding:"10px 12px",color:C.t1,fontSize:13,resize:"vertical",minHeight:90,fontFamily:"inherit",boxSizing:"border-box"}}/>
+              </div>
+            )}
+
+            <button onClick={analyzeCompteur} disabled={loading||(!photoB64&&!ingredients.trim())}
+              style={{width:"100%",padding:"13px",background:loading?C.surfHigh:C.green,border:"none",borderRadius:11,color:"#fff",fontWeight:700,fontSize:14,cursor:loading?"not-allowed":"pointer",marginBottom:16}}>
+              {loading?"⏳ Analyse en cours...":"🔍 Analyser les calories"}
+            </button>
+
+            {compteurResult && !compteurResult.error && (
+              <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:16,marginBottom:16}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.t1,marginBottom:14}}>Résultat de l'analyse</div>
+                <div style={{background:C.bg,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+                  <MacroBars macros={compteurResult.total}/>
+                </div>
+                {Array.isArray(compteurResult.aliments) && compteurResult.aliments.length>0 && (
+                  <div>
+                    <div style={{fontSize:11,fontWeight:800,color:C.green,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Détail par aliment</div>
+                    {compteurResult.aliments.map((a,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<compteurResult.aliments.length-1?`1px solid ${C.bord}`:"none"}}>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:600,color:C.t1}}>{a.nom}</div>
+                          <div style={{fontSize:11,color:C.t4}}>{a.quantite}</div>
+                        </div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontSize:13,fontWeight:800,color:C.t1}}>{a.kcal} kcal</div>
+                          <div style={{fontSize:10,color:C.t3}}>P{a.prot}g · G{a.gluc}g · L{a.lip}g</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {compteurResult && compteurResult.error && (
+              <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:14,marginBottom:12}}>
+                <div style={{fontSize:11,color:C.orange,fontWeight:700,marginBottom:8}}>Résultat brut :</div>
+                <NutritionDisplay text={compteurResult.error}/>
+              </div>
+            )}
           </div>
         )}
 
