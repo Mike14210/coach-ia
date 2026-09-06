@@ -255,7 +255,7 @@ function MD({t}) {
     if(l.startsWith("- ")||l.startsWith("• ")) return <div key={i} style={{display:"flex",gap:6,marginTop:3}}><span style={{color:C.blue}}>›</span><span style={{fontSize:13,color:C.t2,lineHeight:1.6}}>{l.slice(2)}</span></div>;
     if(/^\d+\./.test(l)) return <div key={i} style={{display:"flex",gap:6,marginTop:3}}><span style={{color:C.blue,fontSize:11,fontWeight:700,minWidth:14}}>{l.match(/^\d+/)[0]}.</span><span style={{fontSize:13,color:C.t2,lineHeight:1.6}}>{l.replace(/^\d+\.\s*/,"")}</span></div>;
     const parts=l.split(/\*\*([^*]+)\*\*/g);
-    return <p key={i} style={{fontSize:13,color:"#374151",lineHeight:1.65,margin:"3px 0"}}>{parts.map((p,j)=>j%2?<strong key={j} style={{color:C.t1}}>{p}</strong>:p)}</p>;
+    return <p key={i} style={{fontSize:13,color:C.t2,lineHeight:1.65,margin:"3px 0"}}>{parts.map((p,j)=>j%2?<strong key={j} style={{color:C.t1}}>{p}</strong>:p)}</p>;
   })}</div>;
 }
 
@@ -381,7 +381,7 @@ function Slider({label,val,min,max,unit,onChange}) {
   return (
     <div style={{marginBottom:16}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-        <span style={{fontSize:13,color:"#374151",fontWeight:500}}>{label}</span>
+        <span style={{fontSize:13,color:C.t2,fontWeight:500}}>{label}</span>
         <span style={{fontSize:15,fontWeight:800,color:"#3b6ff0"}}>{val} {unit}</span>
       </div>
       <div style={{position:"relative",height:6,background:C.bord,borderRadius:6}}>
@@ -395,15 +395,15 @@ function Slider({label,val,min,max,unit,onChange}) {
 
 function Opt({active,icon,label,sub,onClick,cols=2}) {
   return (
-    <button onClick={onClick} style={{background:active?"#eef2ff":"#f9fafb",border:`1.5px solid ${active?"#3b6ff0":"#e8eaed"}`,borderRadius:12,padding:"12px 11px",cursor:"pointer",textAlign:"left",width:"100%",transition:"all .15s"}}>
+    <button onClick={onClick} style={{background:active?C.blue+"22":C.surfHigh,border:`1.5px solid ${active?C.blue:C.bord}`,borderRadius:12,padding:"12px 11px",cursor:"pointer",textAlign:"left",width:"100%",transition:"all .15s"}}>
       {icon&&<div style={{fontSize:18,marginBottom:3}}>{icon}</div>}
-      <div style={{fontSize:12,fontWeight:700,color:active?"#3b6ff0":"#0f1117",marginBottom:2}}>{label}</div>
-      {sub&&<div style={{fontSize:10,color:"#6b7280",lineHeight:1.4}}>{sub}</div>}
+      <div style={{fontSize:12,fontWeight:700,color:active?"#93b4ff":C.t1,marginBottom:2}}>{label}</div>
+      {sub&&<div style={{fontSize:10,color:C.t3,lineHeight:1.4}}>{sub}</div>}
     </button>
   );
 }
 
-function ProfileForm({initialProfile,onDone,firstName}) {
+function ProfileForm({initialProfile,onDone,firstName,onHome,onLogout}) {
   const [step,setStep]=useState(0);
   const [p,setP]=useState(initialProfile||{gender:"",age:40,weight:75,height:175,goal:"",level:"",days:3,duration:45,equip:"",limits:"",cardio:""});
   const s=(k,v)=>setP(prev=>({...prev,[k]:v}));
@@ -415,7 +415,7 @@ function ProfileForm({initialProfile,onDone,firstName}) {
       body:<>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
           {[{id:"homme",icon:"♂️",label:"Homme"},{id:"femme",icon:"♀️",label:"Femme"}].map(o=>(
-            <button key={o.id} onClick={()=>s("gender",o.id)} style={{background:p.gender===o.id?"#eef2ff":"#f9fafb",border:`2px solid ${p.gender===o.id?"#3b6ff0":"#e8eaed"}`,borderRadius:14,padding:"18px 10px",cursor:"pointer",textAlign:"center",width:"100%",transition:"all .2s"}}>
+            <button key={o.id} onClick={()=>s("gender",o.id)} style={{background:p.gender===o.id?"#eef2ff":"#f9fafb",border:`2px solid ${p.gender===o.id?"#3b6ff0":C.bord}`,borderRadius:14,padding:"18px 10px",cursor:"pointer",textAlign:"center",width:"100%",transition:"all .2s"}}>
               <div style={{fontSize:30,marginBottom:6}}>{o.icon}</div>
               <div style={{fontSize:14,fontWeight:800,color:p.gender===o.id?"#3b6ff0":"#0f1117"}}>{o.label}</div>
             </button>
@@ -457,12 +457,12 @@ function ProfileForm({initialProfile,onDone,firstName}) {
         <div style={{marginBottom:12}}>
           <div style={{fontSize:12,color:C.t3,marginBottom:6}}>Limitations physiques</div>
           <textarea value={p.limits} onChange={e=>s("limits",e.target.value)} placeholder="Ex: douleur genou, hernie L4-L5..."
-            style={{width:"100%",background:"#f9fafb",border:"1.5px solid #e8eaed",borderRadius:10,padding:"10px 12px",color:"#0f1117",fontSize:13,resize:"vertical",minHeight:60,fontFamily:"inherit",boxSizing:"border-box"}}/>
+            style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,padding:"10px 12px",color:C.t1,fontSize:13,resize:"vertical",minHeight:60,fontFamily:"inherit",boxSizing:"border-box"}}/>
         </div>
         <div>
           <div style={{fontSize:12,color:C.t3,marginBottom:6}}>Activité cardio actuelle</div>
           <textarea value={p.cardio} onChange={e=>s("cardio",e.target.value)} placeholder="Ex: running 2x/sem, natation..."
-            style={{width:"100%",background:"#f9fafb",border:"1.5px solid #e8eaed",borderRadius:10,padding:"10px 12px",color:"#0f1117",fontSize:13,resize:"vertical",minHeight:50,fontFamily:"inherit",boxSizing:"border-box"}}/>
+            style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,padding:"10px 12px",color:C.t1,fontSize:13,resize:"vertical",minHeight:50,fontFamily:"inherit",boxSizing:"border-box"}}/>
         </div>
       </>
     },
@@ -472,6 +472,12 @@ function ProfileForm({initialProfile,onDone,firstName}) {
   return (
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0f1117,#1a1f2e)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 16px",fontFamily:"system-ui,sans-serif"}}>
       <div style={{maxWidth:460,width:"100%"}}>
+        {(onHome||onLogout)&&(
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            {initialProfile&&onHome?<button onClick={onHome} style={{background:C.surfHigh,border:`1px solid ${C.bord}`,borderRadius:9,padding:"8px 13px",color:C.t1,fontSize:13,fontWeight:700,cursor:"pointer"}}>← Accueil</button>:<span/>}
+            {onLogout&&<button onClick={onLogout} style={{background:"none",border:`1px solid ${C.bord}`,borderRadius:9,padding:"8px 13px",color:C.t3,fontSize:12,fontWeight:600,cursor:"pointer"}}>Changer d'utilisateur</button>}
+          </div>
+        )}
         <div style={{textAlign:"center",marginBottom:28}}>
           <div style={{width:60,height:60,borderRadius:18,background:"linear-gradient(135deg,#3b6ff0,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 12px",boxShadow:"0 8px 24px rgba(59,111,240,0.35)"}}>🏋️</div>
           <p style={{fontSize:13,color:"#9ca3af",margin:0}}>Programme personnalisé pour <strong style={{color:"#f9fafb"}}>{firstName}</strong></p>
@@ -479,15 +485,15 @@ function ProfileForm({initialProfile,onDone,firstName}) {
         <div style={{display:"flex",gap:4,marginBottom:20}}>
           {steps.map((_,i)=><div key={i} style={{flex:1,height:4,borderRadius:4,background:i<=step?"linear-gradient(90deg,#3b6ff0,#06b6d4)":"#e8eaed",transition:"all .3s"}}/>)}
         </div>
-        <div style={{background:"#ffffff",borderRadius:20,padding:24,boxShadow:"0 8px 40px rgba(0,0,0,0.4)"}}>
+        <div style={{background:C.surf,borderRadius:20,padding:24,boxShadow:"0 8px 40px rgba(0,0,0,0.4)"}}>
           <div style={{fontSize:10,color:C.blue,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:4,display:"inline-block",background:"rgba(59,130,246,0.12)",padding:"2px 8px",borderRadius:6}}>Étape {step+1}/{steps.length}</div>
-          <h2 style={{fontSize:18,fontWeight:800,color:"#0f1117",margin:"4px 0 3px",letterSpacing:"-0.3px"}}>{cur.title}</h2>
-          <p style={{fontSize:12,color:"#6b7280",margin:"0 0 18px"}}>{cur.sub}</p>
+          <h2 style={{fontSize:18,fontWeight:800,color:C.t1,margin:"4px 0 3px",letterSpacing:"-0.3px"}}>{cur.title}</h2>
+          <p style={{fontSize:12,color:C.t3,margin:"0 0 18px"}}>{cur.sub}</p>
           {cur.body}
           <div style={{display:"flex",gap:8,marginTop:18}}>
-            {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{flex:1,padding:"12px",background:"#f4f5f8",border:"1.5px solid #e8eaed",borderRadius:12,color:"#374151",fontWeight:700,fontSize:13,cursor:"pointer"}}>← Retour</button>}
+            {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{flex:1,padding:"12px",background:C.surfHigh,border:`1px solid ${C.bord}`,borderRadius:12,color:C.t2,fontWeight:700,fontSize:13,cursor:"pointer"}}>← Retour</button>}
             <button disabled={!cur.ok} onClick={()=>last?onDone(p):setStep(s=>s+1)}
-              style={{flex:2,padding:"12px",background:cur.ok?"linear-gradient(135deg,#3b6ff0,#2563eb)":"#e8eaed",border:"none",borderRadius:12,color:cur.ok?"#fff":"#9ca3af",fontWeight:700,fontSize:13,cursor:cur.ok?"pointer":"not-allowed",boxShadow:cur.ok?"0 4px 14px rgba(59,111,240,0.35)":"none",transition:"all .2s"}}>
+              style={{flex:2,padding:"12px",background:cur.ok?"linear-gradient(135deg,#3b6ff0,#2563eb)":C.surfHigh,border:"none",borderRadius:12,color:cur.ok?"#fff":"#9ca3af",fontWeight:700,fontSize:13,cursor:cur.ok?"pointer":"not-allowed",boxShadow:cur.ok?"0 4px 14px rgba(59,111,240,0.35)":"none",transition:"all .2s"}}>
               {last?"🚀 Générer mon programme":"Continuer →"}
             </button>
           </div>
@@ -716,11 +722,11 @@ function SessionBlock({session,accent,logData,onLogSet}) {
   const totalSets=session.exs.reduce((a,ex)=>a+parseInt(ex.sets||3),0);
   const doneSets=session.exs.reduce((a,ex)=>a+(logData[ex.name]?.sets.filter(Boolean).length||0),0);
   return (
-    <div style={{background:"#ffffff",borderRadius:14,marginBottom:12,overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
+    <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,marginBottom:12,overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
       <div style={{background:color+"10",borderBottom:`2px solid ${color}22`,padding:"13px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:color}}/>
-          <span style={{fontWeight:800,fontSize:14,color:"#0f1117"}}>{session.name}</span>
+          <span style={{fontWeight:800,fontSize:14,color:C.t1}}>{session.name}</span>
           <span style={{fontSize:11,color:"#9ca3af",marginLeft:4}}>{session.exs.length} exercices</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -757,17 +763,17 @@ function ProgramView({parsed,profile,firstName}) {
       </div>
       {parsed.cals&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
         {[["Métabolisme",parsed.cals.base+" kcal",C.t2],["Objectif",parsed.cals.cible+" kcal",C.blue],["Protéines/j",parsed.cals.prot+"g",C.green]].map(([l,v,c])=>(
-          <div key={l} style={{background:"#ffffff",borderRadius:12,padding:"13px 10px",textAlign:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.07)"}}>
+          <div key={l} style={{background:C.surf,borderRadius:12,padding:"13px 10px",border:`1px solid ${C.bord}`,textAlign:"center",boxShadow:"0 2px 8px rgba(0,0,0,0.07)"}}>
             <div style={{fontSize:14,fontWeight:800,color:c}}>{v}</div>
             <div style={{fontSize:9,color:C.t3,marginTop:3}}>{l}</div>
           </div>
         ))}
       </div>}
-      {parsed.bilan&&<div style={{background:"#ffffff",borderRadius:14,padding:16,marginBottom:12,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}><div style={{fontSize:10,color:"#6b7280",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Analyse</div><MD t={parsed.bilan}/></div>}
-      {parsed.strat&&<div style={{background:"#ffffff",borderRadius:14,padding:16,marginBottom:12,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}><div style={{fontSize:10,color:"#6b7280",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Stratégie</div><MD t={parsed.strat}/></div>}
-      {parsed.week&&<div style={{background:"#ffffff",borderRadius:14,padding:16,marginBottom:12,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}><div style={{fontSize:10,color:"#6b7280",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Planning semaine</div><MD t={parsed.week}/></div>}
+      {parsed.bilan&&<div style={{background:C.surf,borderRadius:14,padding:16,border:`1px solid ${C.bord}`,marginBottom:12,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}><div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Analyse</div><MD t={parsed.bilan}/></div>}
+      {parsed.strat&&<div style={{background:C.surf,borderRadius:14,padding:16,border:`1px solid ${C.bord}`,marginBottom:12,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}><div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Stratégie</div><MD t={parsed.strat}/></div>}
+      {parsed.week&&<div style={{background:C.surf,borderRadius:14,padding:16,border:`1px solid ${C.bord}`,marginBottom:12,boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}><div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Planning semaine</div><MD t={parsed.week}/></div>}
       {parsed.sessions.length>0&&<div style={{marginBottom:10}}><div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Séances</div></div>}
-      {parsed.prog&&<div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:14}}><div style={{fontSize:10,color:"#6b7280",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Progression 8 semaines</div><MD t={parsed.prog}/></div>}
+      {parsed.prog&&<div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:14}}><div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Progression 8 semaines</div><MD t={parsed.prog}/></div>}
     </div>
   );
 }
@@ -784,7 +790,7 @@ function Bubble({msg,profile,firstName,logData,onLogSet}) {
       <div style={{width:32,height:32,borderRadius:10,background:"linear-gradient(135deg,#3b6ff0,#06b6d4)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0,marginTop:2,boxShadow:"0 2px 8px rgba(59,111,240,0.3)"}}>🧠</div>
       <div style={{flex:1,minWidth:0}}>
         {msg.loading
-          ?<div style={{background:"#ffffff",borderRadius:"4px 16px 16px 16px",padding:"14px 16px",display:"flex",gap:5,alignItems:"center",boxShadow:"0 2px 12px rgba(0,0,0,0.12)"}}>
+          ?<div style={{background:C.surfHigh,borderRadius:"4px 16px 16px 16px",padding:"14px 16px",display:"flex",gap:5,alignItems:"center",boxShadow:"0 2px 12px rgba(0,0,0,0.12)"}}>
             {[0,1,2].map(i=><div key={i} style={{width:7,height:7,borderRadius:"50%",background:C.blue,animation:"p 1.2s ease-in-out infinite",animationDelay:`${i*.2}s`}}/>)}
             <style>{`@keyframes p{0%,80%,100%{opacity:.3;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}`}</style>
             <span style={{fontSize:12,color:C.t3,marginLeft:5}}>Génération en cours...</span>
@@ -801,7 +807,7 @@ function Bubble({msg,profile,firstName,logData,onLogSet}) {
               </div>
             )}
           </>
-          :<div style={{background:"#ffffff",borderRadius:"4px 16px 16px 16px",padding:"14px 16px",boxShadow:"0 2px 12px rgba(0,0,0,0.12)"}}><MD t={msg.content}/></div>
+          :<div style={{background:C.surfHigh,borderRadius:"4px 16px 16px 16px",padding:"14px 16px",boxShadow:"0 2px 12px rgba(0,0,0,0.12)"}}><MD t={msg.content}/></div>
         }
       </div>
     </div>
@@ -2306,10 +2312,11 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
       ? `Génère une liste de courses pour une semaine pour ${firstName}. Profil : ${profile?.goal}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${cals} kcal/jour et ${prot}g de protéines/jour. Contraintes/préférences : ${ingredients || "aucune"}. Inclus : liste de courses organisée par rayon, 5 repas types avec recettes simples, macros journaliers moyens.`
       : `Génère un plan de repas complet pour la semaine pour ${firstName}. Profil : ${profile?.goal}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${cals} kcal/jour et ${prot}g de protéines. Notes : ${ingredients || "aucune"}. Inclus : 7 jours de repas (petit-déjeuner, déjeuner, dîner, collation), macros par jour, liste de courses.`;
     try {
+      const maxTok = mode === "semaine" ? 4000 : mode === "courses" ? 2500 : 1800;
       const r = await fetch(API+"/api/coach", {
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
-        body:JSON.stringify({system:`Tu es un nutritionniste expert. Réponds en français de façon claire et pratique. Structure bien avec des sections. Adapte toujours à l'objectif sportif de l'utilisateur.`,messages:[{role:"user",content:prompt}],max_tokens:1500})
+        body:JSON.stringify({system:`Tu es un nutritionniste expert. Réponds en français de façon claire et pratique. Structure bien avec des sections. Sois complet : si on te demande 7 jours, donne les 7 jours en entier. Adapte toujours à l'objectif sportif de l'utilisateur.`,messages:[{role:"user",content:prompt}],max_tokens:maxTok})
       });
       const data = await r.json();
       setResult(data.content?.[0]?.text || "Erreur de génération");
@@ -3244,7 +3251,7 @@ function MuscleScreen({ profile, onClose }) {
     </div>
   );
 }
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles}) {
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -3266,9 +3273,12 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
             <div style={{fontSize:10,color:C.t4,textTransform:"capitalize"}}>{today}</div>
           </div>
         </div>
-        <div style={{width:32,height:32,borderRadius:"50%",background:C.surfHigh,border:"1.5px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:C.t3,fontWeight:700}}>
-          {firstName?firstName[0].toUpperCase():"?"}
-        </div>
+        <button onClick={onLogout} title="Changer d'utilisateur" style={{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:0}}>
+          <span style={{fontSize:11,color:C.t3,fontWeight:600}}>Changer</span>
+          <div style={{width:32,height:32,borderRadius:"50%",background:C.surfHigh,border:"1.5px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:C.t3,fontWeight:700}}>
+            {firstName?firstName[0].toUpperCase():"?"}
+          </div>
+        </button>
       </div>
 
       {/* Scrollable content */}
@@ -3536,7 +3546,7 @@ export default function App() {
   );
 
   if(screen==="auth") return <AuthScreen onAuth={handleAuth}/>;
-  if(screen==="form"||!profile) return <ProfileForm initialProfile={profile} onDone={handleProfileDone} firstName={user?.first_name||"toi"}/>;
+  if(screen==="form"||!profile) return <ProfileForm initialProfile={profile} onDone={handleProfileDone} firstName={user?.first_name||"toi"} onHome={()=>{setScreen("chat");setHomeScreen(true);}} onLogout={handleLogout}/>;
 
   const equipOpts=[
     {id:null,icon:"🔄",label:"Mon équipement habituel"},
@@ -3597,7 +3607,14 @@ export default function App() {
               onProfil={()=>setScreen("form")}
               onWeight={()=>setShowWeight(true)}
               onMuscles={()=>setShowMuscles(true)}
+              onLogout={handleLogout}
             />
+          )}
+          {!homeScreen&&(
+            <div style={{position:"sticky",top:0,zIndex:20,background:C.bg,borderBottom:`1px solid ${C.bord}`,padding:"10px 12px",display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <button onClick={()=>setHomeScreen(true)} style={{background:C.surfHigh,border:`1px solid ${C.bord}`,borderRadius:9,padding:"8px 13px",color:C.t1,fontSize:13,fontWeight:700,cursor:"pointer"}}>← Accueil</button>
+              <button onClick={()=>setShowEquip(true)} style={{marginLeft:"auto",background:"rgba(59,111,240,0.15)",border:`1px solid ${C.blue}55`,borderRadius:9,padding:"8px 13px",color:"#93b4ff",fontSize:13,fontWeight:700,cursor:"pointer"}}>🎛 Matériel du jour</button>
+            </div>
           )}
           {!homeScreen&&msgs.map((m,i)=><Bubble key={i} msg={m} profile={profile} firstName={firstName} logData={logData} onLogSet={handleLogSet}/>)}
           {msgs.length===0&&!homeScreen&&(
