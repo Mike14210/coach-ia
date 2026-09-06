@@ -2301,8 +2301,22 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const b64 = reader.result.split(",")[1];
-      setPhotoB64({ data: b64, type: file.type || "image/jpeg", preview: reader.result });
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 800;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          const r = Math.min(MAX / w, MAX / h);
+          w = Math.round(w * r); h = Math.round(h * r);
+        }
+        const cvs = document.createElement("canvas");
+        cvs.width = w; cvs.height = h;
+        cvs.getContext("2d").drawImage(img, 0, 0, w, h);
+        const compressed = cvs.toDataURL("image/jpeg", 0.7);
+        const b64 = compressed.split(",")[1];
+        setPhotoB64({ data: b64, type: "image/jpeg", preview: compressed });
+      };
+      img.src = reader.result;
     };
     reader.readAsDataURL(file);
   };
@@ -2335,7 +2349,14 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
         if (parsed && parsed.total) setCompteurResult(parsed);
         else setCompteurResult({ error: text });
       } catch { setCompteurResult({ error: text || "Erreur d'analyse" }); }
-    } catch(e) { setCompteurResult({ error: "Erreur : "+e.message }); }
+    } catch(e) {
+      if (photoB64) {
+        setCompteurResult({ error: "La photo n'a pas pu être analysée (ton serveur ne supporte peut-être pas encore les images). Décris ton repas en texte à la place — le calcul sera tout aussi précis !" });
+        setPhotoB64(null);
+      } else {
+        setCompteurResult({ error: "Erreur : "+e.message });
+      }
+    }
     setLoading(false);
   };
 
