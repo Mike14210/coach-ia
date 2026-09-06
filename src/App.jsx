@@ -2551,7 +2551,7 @@ function Journal({token, onClose}) {
 }
 
 
-function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack}) {
+function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack, onAdapt}) {
   const [tab, setTab] = useState("analyse"); // analyse | seances | progression | nutrition
   const [showChat, setShowChat] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);
@@ -2601,6 +2601,7 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
         <div style={{maxWidth:720,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
             <button onClick={onBack} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>← Accueil</button>
+            {onAdapt&&<button onClick={onAdapt} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>🔧 Adapter aujourd'hui</button>}
             <div style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>Programme de {firstName}</div>
           </div>
           
@@ -3553,6 +3554,7 @@ export default function App() {
       logData={logData}
       onLogSet={handleLogSet}
       onBack={()=>setShowDashboard(false)}
+      onAdapt={()=>setShowEquip(true)}
     />
   );
 
