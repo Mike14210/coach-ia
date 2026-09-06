@@ -1516,10 +1516,20 @@ RÈGLES DE PROGRESSION :
       }
     } catch {}
 
+    // Lire le score de forme du jour
+    let readinessNote = "";
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_readiness") || "{}");
+      const today = new Date().toISOString().split("T")[0];
+      if (all[today]) {
+        const r = all[today];
+        readinessNote = ` | SCORE DE FORME : ${r.total}% (sommeil ${r.sleep}/5, courbatures ${r.soreness}/5, énergie ${r.energy}/5, stress ${r.stress}/5) → intensité recommandée : ${r.intensity}. ADAPTE la séance à ce niveau de forme.`;
+      }
+    } catch {}
     const prompt = `Tu es un coach sportif expert. Génère une séance unique pour ${firstName}.
 DURÉE TOTALE STRICTE : ${duree} min = échauffement ${warmupMins2} min + séance ${mainMins2} min + retour au calme ${cooldownMins2} min.
 Ne pas dépasser ${duree} min. Pour ${mainMins2} min de séance principale : musculation ${Math.max(3,Math.floor(mainMins2/8))} exercices (8min/exercice : 3 séries + repos + installation). Respecter strictement ce nombre.par exercice avec repos). Ne pas depasser cette limite.
-Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}${todayAdj?" | AJUSTEMENT DU JOUR (ponctuel) : respecter STRICTEMENT la durée et le matériel indiqués, c'est une contrainte du jour.":""}
+Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}${todayAdj?" | AJUSTEMENT DU JOUR (ponctuel) : respecter STRICTEMENT la durée et le matériel indiqués, c'est une contrainte du jour.":""}${readinessNote}
 ${profile ? `Niveau : ${profile.level} | Age : ${profile.age} ans` : ""}
 ${historyContext}
 
@@ -3574,7 +3584,82 @@ function MuscleScreen({ profile, onClose }) {
     </div>
   );
 }
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout}) {
+// ─── SCORE DE FORME ──────────────────────────────────────────────────────────
+function ReadinessPanel({ profile, onClose, onDone }) {
+  const dims = [
+    { id:"sleep",    icon:"🌙", label:"Qualité du sommeil",   low:"Très mauvaise", high:"Excellente" },
+    { id:"soreness", icon:"🦵", label:"Courbatures",          low:"Très courbaturé", high:"Frais" },
+    { id:"energy",   icon:"⚡", label:"Niveau d'énergie",     low:"Épuisé", high:"Plein d'énergie" },
+    { id:"stress",   icon:"🧠", label:"Niveau de stress",     low:"Très stressé", high:"Détendu" },
+  ];
+  const [scores, setScores] = useState({ sleep:3, soreness:3, energy:3, stress:3 });
+  const [result, setResult] = useState(null);
+
+  const total = Math.round((scores.sleep + scores.soreness + scores.energy + scores.stress) / 20 * 100);
+  const color = total >= 85 ? C.green : total >= 60 ? C.orange : C.red;
+  const reco = total >= 85 ? "Tu es au top — envoie du lourd !" : total >= 70 ? "Forme correcte — séance normale." : total >= 50 ? "Fatigue détectée — séance allégée recommandée." : "Récupération prioritaire — repos ou mobilité.";
+  const intensity = total >= 85 ? "intense" : total >= 70 ? "normale" : total >= 50 ? "légère" : "repos";
+
+  const save = () => {
+    const entry = { date: new Date().toISOString().split("T")[0], ...scores, total, intensity, reco };
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_readiness") || "{}");
+      all[entry.date] = entry;
+      const keys = Object.keys(all).sort().reverse().slice(0, 30);
+      const trimmed = {}; keys.forEach(k => { trimmed[k] = all[k]; });
+      localStorage.setItem("coach_readiness", JSON.stringify(trimmed));
+    } catch {}
+    if (onDone) onDone(entry);
+    onClose();
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:`linear-gradient(135deg,#1e3a8a,#3b82f6)`,padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>🎯 Score de forme</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.65)"}}>Comment te sens-tu aujourd'hui ?</div>
+        </div>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+        {dims.map(d => (
+          <div key={d.id} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:"14px 16px",marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style={{fontSize:20}}>{d.icon}</span>
+              <span style={{fontSize:14,fontWeight:700,color:C.t1}}>{d.label}</span>
+              <span style={{marginLeft:"auto",fontSize:18,fontWeight:900,color:scores[d.id]>=4?C.green:scores[d.id]>=3?C.orange:C.red}}>{scores[d.id]}/5</span>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              {[1,2,3,4,5].map(v => (
+                <button key={v} onClick={() => setScores(s => ({...s, [d.id]:v}))}
+                  style={{flex:1,height:38,borderRadius:10,border:`1.5px solid ${scores[d.id]===v?C.blue:C.bord}`,
+                    background:scores[d.id]===v?"rgba(59,111,240,0.2)":scores[d.id]>v?"rgba(59,111,240,0.06)":C.bg,
+                    cursor:"pointer",fontSize:13,fontWeight:700,color:scores[d.id]===v?"#93b4ff":C.t3}}>{v}</button>
+              ))}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:5,fontSize:10,color:C.t4}}>
+              <span>{d.low}</span><span>{d.high}</span>
+            </div>
+          </div>
+        ))}
+
+        {/* Résultat en temps réel */}
+        <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:16,padding:"20px",textAlign:"center",marginBottom:16}}>
+          <div style={{fontSize:48,fontWeight:900,color,lineHeight:1}}>{total}%</div>
+          <div style={{fontSize:13,fontWeight:700,color:C.t2,marginTop:6}}>{reco}</div>
+          <div style={{fontSize:11,color:C.t4,marginTop:4}}>Intensité recommandée : <strong style={{color}}>{intensity}</strong></div>
+        </div>
+
+        <button onClick={save} style={{width:"100%",padding:"14px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
+          ✓ Valider mon score du jour
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -3612,6 +3697,29 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
           <div style={{fontSize:13,color:C.t4,marginBottom:3}}>Que fais-tu aujourd'hui ?</div>
           <div style={{fontSize:26,fontWeight:800,color:C.t1,letterSpacing:"-0.5px"}}>Bonjour {firstName || "Champion"} 👋</div>
         </div>
+
+        {/* Score de forme */}
+        <button onClick={onReadiness} style={{width:"100%",background:C.surf,border:`1px solid ${C.bord}`,borderRadius:16,padding:"14px 16px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+          {readiness ? (
+            <>
+              <div style={{width:52,height:52,borderRadius:"50%",background:C.bg,border:`3px solid ${readiness.total>=85?C.green:readiness.total>=60?C.orange:C.red}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:900,color:readiness.total>=85?C.green:readiness.total>=60?C.orange:C.red,flexShrink:0}}>{readiness.total}%</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.t1,marginBottom:2}}>Score de forme</div>
+                <div style={{fontSize:11,color:C.t3,lineHeight:1.4}}>{readiness.reco}</div>
+              </div>
+              <div style={{fontSize:10,color:C.t4,fontWeight:600,flexShrink:0}}>Refaire →</div>
+            </>
+          ) : (
+            <>
+              <div style={{width:52,height:52,borderRadius:"50%",background:"rgba(59,111,240,0.12)",border:`2px dashed ${C.blue}55`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>🎯</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.t1,marginBottom:2}}>Score de forme</div>
+                <div style={{fontSize:11,color:C.t3}}>Évalue ta forme en 30 sec pour adapter ta séance</div>
+              </div>
+              <div style={{background:"rgba(59,111,240,0.15)",borderRadius:8,padding:"5px 10px",fontSize:11,color:"#93b4ff",fontWeight:700,flexShrink:0}}>Go →</div>
+            </>
+          )}
+        </button>
 
         {/* Main cards 2-col */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
@@ -3725,6 +3833,17 @@ export default function App() {
   const [showWeight,setShowWeight]=useState(false);
   const [showHIIT,setShowHIIT]=useState(false);
   const [showMuscles,setShowMuscles]=useState(false);
+  const [showReadiness,setShowReadiness]=useState(false);
+  const [todayReadiness,setTodayReadiness]=useState(null);
+
+  // Charger le score du jour au démarrage
+  useEffect(() => {
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_readiness") || "{}");
+      const today = new Date().toISOString().split("T")[0];
+      if (all[today]) setTodayReadiness(all[today]);
+    } catch {}
+  }, []);
   const [logData,setLogData]=useState({});
   const [loading,setLoading]=useState(true);
   const [screen,setScreen]=useState("loading"); // loading|form|chat
@@ -3892,6 +4011,7 @@ export default function App() {
       {showWeight&&<BodyWeightTracker onClose={()=>setShowWeight(false)}/>}
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
       {showMuscles&&<MuscleScreen profile={profile} onClose={()=>setShowMuscles(false)}/>}
+      {showReadiness&&<ReadinessPanel profile={profile} onClose={()=>setShowReadiness(false)} onDone={(entry)=>setTodayReadiness(entry)}/>}
       {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send} programCals={dashboardParsed?.cals}/>}
 
       {/* Main content - no old header */}
@@ -3936,6 +4056,8 @@ export default function App() {
               onWeight={()=>setShowWeight(true)}
               onMuscles={()=>setShowMuscles(true)}
               onLogout={handleLogout}
+              onReadiness={()=>setShowReadiness(true)}
+              readiness={todayReadiness}
             />
           )}
           {!homeScreen&&(
