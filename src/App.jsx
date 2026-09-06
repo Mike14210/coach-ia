@@ -2551,13 +2551,23 @@ function Journal({token, onClose}) {
 }
 
 
-function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack, onAdapt}) {
+function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack}) {
   const [tab, setTab] = useState("analyse"); // analyse | seances | progression | nutrition
   const [showChat, setShowChat] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const chatBottom = useRef(null);
+  const [showAdapt, setShowAdapt] = useState(false);
+  const [adaptTime, setAdaptTime] = useState(null);
+  const [adaptEquip, setAdaptEquip] = useState(null);
+  const adaptOpts = [
+    {id:null,icon:"🔄",label:"Mon équipement habituel"},
+    {id:"Salle complète",icon:"🏋️",label:"Salle complète"},
+    {id:"Haltères + barre + banc",icon:"🥊",label:"Haltères + Barre"},
+    {id:"2 haltères uniquement",icon:"🧳",label:"2 haltères"},
+    {id:"Poids du corps",icon:"🏠",label:"Poids du corps"},
+  ];
 
   useEffect(()=>{ chatBottom.current?.scrollIntoView({behavior:"smooth"}); },[chatMsgs]);
 
@@ -2601,7 +2611,7 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
         <div style={{maxWidth:720,margin:"0 auto"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
             <button onClick={onBack} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>← Accueil</button>
-            {onAdapt&&<button onClick={onAdapt} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>🔧 Adapter aujourd'hui</button>}
+            {<button onClick={()=>setShowAdapt(true)} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>🔧 Adapter aujourd'hui</button>}
             <div style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>Programme de {firstName}</div>
           </div>
           
@@ -2742,6 +2752,41 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {showAdapt&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:300,display:"flex",alignItems:"flex-end"}} onClick={()=>setShowAdapt(false)}>
+          <div style={{width:"100%",maxWidth:680,margin:"0 auto",background:C.surfHigh,borderRadius:"17px 17px 0 0",padding:"20px 15px 28px",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:15,fontWeight:800,color:C.t1,marginBottom:3}}>Adapter la séance du jour</div>
+            <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.45}}>Moins de temps ou pas le bon matériel ? Le coach adapte la séance du jour et rééquilibre les suivantes.</div>
+            <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>⏱ Temps dispo</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
+              {[[null,"Comme prévu"],[20,"20 min"],[30,"30 min"],[45,"45 min"],[60,"1 h"]].map(([v,l])=>(
+                <button key={String(v)} onClick={()=>setAdaptTime(v)} style={{flex:"1 0 28%",padding:"9px",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:700,background:adaptTime===v?C.green+"22":C.bg,border:`1.5px solid ${adaptTime===v?C.green:C.bord}`,color:adaptTime===v?"#6ee7b7":C.t2}}>{l}</button>
+              ))}
+            </div>
+            <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>🏋️ Matériel dispo</div>
+            <div style={{marginBottom:18}}>
+              {adaptOpts.map(o=>(
+                <button key={String(o.id)} onClick={()=>setAdaptEquip(o.id)} style={{background:adaptEquip===o.id?C.blue+"18":C.bg,border:`1.5px solid ${adaptEquip===o.id?C.blue:C.bord}`,borderRadius:10,padding:"11px 13px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,marginBottom:6,width:"100%",color:C.t1,fontSize:13,fontWeight:600}}>
+                  <span style={{fontSize:17}}>{o.icon}</span>{o.label}
+                  {adaptEquip===o.id&&<span style={{marginLeft:"auto",fontSize:11,color:C.blue,fontWeight:700}}>✓</span>}
+                </button>
+              ))}
+            </div>
+            <button onClick={()=>{
+              setShowAdapt(false);
+              const parts=[];
+              if(adaptTime) parts.push(`je n'ai que ${adaptTime} min aujourd'hui`);
+              if(adaptEquip) parts.push(`je n'ai accès qu'à : ${adaptEquip}`);
+              try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:adaptTime,equip:adaptEquip}));}catch{}
+              const cons=parts.length?parts.join(" et "):"des conditions inhabituelles aujourd'hui";
+              setShowChat(true);
+              sendChat(`Ajustement ponctuel pour aujourd'hui uniquement : ${cons}. 1) Donne-moi ma séance du jour adaptée précisément à ces contraintes. 2) Rééquilibre mes prochaines séances de la semaine pour rester aligné avec mon objectif global (${profile.goal}). C'est un ajustement temporaire : ne modifie pas la structure d'ensemble du programme.`);
+            }} style={{width:"100%",padding:"13px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
+              Adapter et rééquilibrer →
+            </button>
           </div>
         </div>
       )}
@@ -3554,7 +3599,6 @@ export default function App() {
       logData={logData}
       onLogSet={handleLogSet}
       onBack={()=>setShowDashboard(false)}
-      onAdapt={()=>setShowEquip(true)}
     />
   );
 
