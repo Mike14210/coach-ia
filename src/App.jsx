@@ -3749,6 +3749,9 @@ export default function App() {
         if(data.chatHistory?.length>0){
           const restored=data.chatHistory.map(m=>({...m,parsed:m.role==="assistant"?parse(m.content):null}));
           setMsgs(restored);
+          // Restaurer dashboardParsed depuis le dernier message parsé avec cals
+          const lastProg = [...restored].reverse().find(m=>m.parsed&&m.parsed.cals);
+          if(lastProg?.parsed) setDashboardParsed(lastProg.parsed);
         }
         // Always show home screen first
         setScreen("chat");
