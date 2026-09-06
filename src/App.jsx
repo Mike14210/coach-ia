@@ -2261,7 +2261,7 @@ function parseRecipes(text) {
 }
 
 // ─── NUTRITION PANEL ──────────────────────────────────────────────────────────
-function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
+function NutritionPanel({token, profile, firstName, onClose, sendToChat, programCals}) {
   const [mode, setMode] = useState("recettes"); // recettes | frigo | courses | semaine | mesrecettes
   const [ingredients, setIngredients] = useState("");
   const [loading, setLoading] = useState(false);
@@ -2275,12 +2275,13 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
   }, []);
 
   const imc = profile ? (profile.weight/((profile.height/100)**2)).toFixed(1) : "?";
-  const cals = profile ? Math.round(
+  const bmr = profile ? Math.round(
     (profile.gender === "femme"
       ? (10*profile.weight + 6.25*profile.height - 5*profile.age - 161)
       : (10*profile.weight + 6.25*profile.height - 5*profile.age + 5)) * 1.55
   ) : 2000;
-  const prot = profile ? Math.round(profile.weight * 2) : 150;
+  const cals = programCals?.cible ? Number(programCals.cible) : bmr;
+  const prot = programCals?.prot ? Number(programCals.prot) : (profile ? Math.round(profile.weight * 2) : 150);
 
   const modeLabels = {
     recettes:    { icon:"🍳", label:"Recettes", placeholder:"Ex: 4 recettes riches en protéines pour le dîner, rapides, sans lactose..." },
@@ -3888,7 +3889,7 @@ export default function App() {
       {showWeight&&<BodyWeightTracker onClose={()=>setShowWeight(false)}/>}
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
       {showMuscles&&<MuscleScreen profile={profile} onClose={()=>setShowMuscles(false)}/>}
-      {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send}/>}
+      {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send} programCals={dashboardParsed?.cals}/>}
 
       {/* Main content - no old header */}
       <div style={{flex:1,overflowY:"auto",background:C.bg}}>
