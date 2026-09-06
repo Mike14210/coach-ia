@@ -2289,12 +2289,56 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
     courses:     { icon:"🛒", label:"Courses", placeholder:"Ex: budget 50€, j'aime le poulet et le poisson..." },
     semaine:     { icon:"📅", label:"Plan semaine", placeholder:"Contraintes, allergies, préférences..." },
     mesrecettes: { icon:"♥", label:"Mes recettes" },
+    journal:     { icon:"📋", label:"Journal" },
   };
   const isLib = mode === "mesrecettes";
   const isCompteur = mode === "compteur";
+  const isJournal = mode === "journal";
   const [photoB64, setPhotoB64] = useState(null);
   const [compteurResult, setCompteurResult] = useState(null);
   const photoRef = useRef(null);
+  const [journalEntries, setJournalEntries] = useState([]);
+  const todayKey = new Date().toISOString().split("T")[0];
+
+  useEffect(() => {
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_nutrition_journal") || "{}");
+      setJournalEntries(all[todayKey] || []);
+    } catch {}
+  }, []);
+
+  const saveJournal = (entries) => {
+    setJournalEntries(entries);
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_nutrition_journal") || "{}");
+      all[todayKey] = entries;
+      // garder 30 jours max
+      const keys = Object.keys(all).sort().reverse().slice(0, 30);
+      const trimmed = {}; keys.forEach(k => { trimmed[k] = all[k]; });
+      localStorage.setItem("coach_nutrition_journal", JSON.stringify(trimmed));
+    } catch {}
+  };
+
+  const addToJournal = (aliments, total) => {
+    const entry = {
+      id: Date.now(),
+      time: new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }),
+      aliments: aliments || [],
+      total: total || { kcal:0, prot:0, gluc:0, lip:0 },
+    };
+    saveJournal([...journalEntries, entry]);
+  };
+
+  const removeFromJournal = (id) => {
+    saveJournal(journalEntries.filter(e => e.id !== id));
+  };
+
+  const journalTotals = journalEntries.reduce((acc, e) => ({
+    kcal: acc.kcal + (e.total?.kcal || 0),
+    prot: acc.prot + (e.total?.prot || 0),
+    gluc: acc.gluc + (e.total?.gluc || 0),
+    lip: acc.lip + (e.total?.lip || 0),
+  }), { kcal:0, prot:0, gluc:0, lip:0 });
 
   const handlePhoto = (e) => {
     const file = e.target.files?.[0];
@@ -2439,7 +2483,7 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
         </div>
 
         {/* Objectifs */}
-        {profile && !isLib && (
+        {profile && !isLib && !isJournal && (
           <div style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:11,padding:"12px",marginBottom:14}}>
             <div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Tes objectifs nutritionnels</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
@@ -2454,7 +2498,7 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
         )}
 
         {/* Générateur */}
-        {!isLib && !isCompteur && (
+        {!isLib && !isCompteur && !isJournal && (
           <>
             <div style={{marginBottom:14}}>
               <div style={{fontSize:12,color:C.t3,marginBottom:6}}>{modeLabels[mode].label}</div>
@@ -2540,6 +2584,9 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
                     ))}
                   </div>
                 )}
+                <button onClick={()=>{addToJournal(compteurResult.aliments, compteurResult.total);setCompteurResult(null);setIngredients("");}} style={{width:"100%",marginTop:12,padding:"11px",background:"rgba(59,111,240,0.15)",border:`1px solid ${C.blue}55`,borderRadius:10,color:"#93b4ff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                  📋 Ajouter au journal du jour
+                </button>
               </div>
             )}
             {compteurResult && compteurResult.error && (
@@ -2548,6 +2595,78 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat}) {
                 <NutritionDisplay text={compteurResult.error}/>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Journal nutrition */}
+        {isJournal && (
+          <div>
+            {/* Jauges du jour */}
+            <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:16,marginBottom:16}}>
+              <div style={{fontSize:14,fontWeight:800,color:C.t1,marginBottom:4}}>Aujourd'hui</div>
+              <div style={{fontSize:11,color:C.t3,marginBottom:14}}>{journalEntries.length} repas enregistré{journalEntries.length!==1?"s":""}</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                {[["Calories",journalTotals.kcal,cals,"kcal",C.green],["Protéines",journalTotals.prot,prot,"g",C.blue]].map(([label,val,target,unit,color])=>{
+                  const pct=Math.min(Math.round(val/target*100),150);
+                  const over=pct>100;
+                  return (
+                    <div key={label} style={{background:C.bg,borderRadius:12,padding:"14px 12px",textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:900,color:over?C.orange:color}}>{Math.round(val)}</div>
+                      <div style={{fontSize:11,color:C.t3,marginBottom:8}}>/ {target} {unit}</div>
+                      <div style={{height:6,background:"rgba(255,255,255,0.08)",borderRadius:4,overflow:"hidden"}}>
+                        <div style={{width:Math.min(pct,100)+"%",height:"100%",background:over?C.orange:color,borderRadius:4,transition:"width .4s ease"}}/>
+                      </div>
+                      <div style={{fontSize:10,color:over?C.orange:C.t4,marginTop:4,fontWeight:600}}>{pct}%</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                {[["Glucides",journalTotals.gluc,"g",C.blue],["Lipides",journalTotals.lip,"g",C.orange]].map(([l,v,u,c])=>(
+                  <div key={l} style={{background:C.bg,borderRadius:8,padding:"8px",textAlign:"center"}}>
+                    <div style={{fontSize:15,fontWeight:800,color:c}}>{Math.round(v)}{u}</div>
+                    <div style={{fontSize:10,color:C.t4}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Entrées du jour */}
+            {journalEntries.length > 0 ? (
+              <div>
+                <div style={{fontSize:11,fontWeight:800,color:C.t3,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Repas du jour</div>
+                {journalEntries.map((entry) => (
+                  <div key={entry.id} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.t1}}>🕐 {entry.time}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:14,fontWeight:800,color:C.green}}>{Math.round(entry.total?.kcal||0)} kcal</span>
+                        <button onClick={()=>removeFromJournal(entry.id)} style={{background:"none",border:"none",color:C.t4,fontSize:14,cursor:"pointer",padding:"2px"}}>✕</button>
+                      </div>
+                    </div>
+                    {Array.isArray(entry.aliments) && entry.aliments.length>0 && (
+                      <div style={{fontSize:12,color:C.t3,lineHeight:1.5}}>
+                        {entry.aliments.map(a=>a.nom).join(" · ")}
+                      </div>
+                    )}
+                    <div style={{fontSize:10,color:C.t4,marginTop:4}}>
+                      P{Math.round(entry.total?.prot||0)}g · G{Math.round(entry.total?.gluc||0)}g · L{Math.round(entry.total?.lip||0)}g
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{textAlign:"center",padding:"36px 20px"}}>
+                <div style={{fontSize:44,marginBottom:12}}>📋</div>
+                <div style={{fontSize:14,fontWeight:700,color:C.t2,marginBottom:6}}>Aucun repas enregistré</div>
+                <div style={{fontSize:13,color:C.t4,lineHeight:1.5}}>Va dans l'onglet <strong style={{color:C.t2}}>📸 Compteur</strong>, analyse un repas, puis touche « Ajouter au journal ».</div>
+              </div>
+            )}
+
+            {/* Ajouter manuellement */}
+            <button onClick={()=>{setMode("compteur");setCompteurResult(null);setPhotoB64(null);}} style={{width:"100%",marginTop:14,padding:"12px",background:"rgba(16,185,129,0.12)",border:`1px solid ${C.green}55`,borderRadius:11,color:C.green,fontWeight:700,fontSize:13,cursor:"pointer"}}>
+              + Analyser un repas
+            </button>
           </div>
         )}
 
