@@ -3584,6 +3584,186 @@ function MuscleScreen({ profile, onClose }) {
     </div>
   );
 }
+// ─── BILAN HEBDOMADAIRE ──────────────────────────────────────────────────────
+function BilanPanel({ profile, firstName, token, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(null);
+  const [insights, setInsights] = useState(null);
+
+  useEffect(() => {
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 864e5);
+    const weekKey = (d) => d.toISOString().split("T")[0];
+
+    // 1. Séances
+    let sessions = [];
+    try { sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]"); } catch {}
+    const weekSessions = sessions.filter(s => s && s.type !== "weight" && s.date && new Date(s.date) >= weekAgo);
+    const totalDuree = weekSessions.reduce((a, s) => a + (s.duree || 0), 0);
+    const sportsCount = {};
+    weekSessions.forEach(s => { sportsCount[s.sport] = (sportsCount[s.sport] || 0) + 1; });
+
+    // 2. Muscles
+    const muscleCount = {};
+    weekSessions.forEach(s => {
+      const groups = Array.isArray(s.muscles) && s.muscles.length ? s.muscles : [];
+      groups.forEach(g => { muscleCount[g] = (muscleCount[g] || 0) + 1; });
+    });
+    const allMuscles = ["Pectoraux","Dos","Épaules","Biceps","Triceps","Abdominaux","Quadriceps","Ischio-jambiers","Fessiers","Mollets"];
+    const neglected = allMuscles.filter(m => !muscleCount[m]);
+
+    // 3. Nutrition
+    let nutritionDays = 0, totalKcal = 0, totalProt = 0;
+    try {
+      const journal = JSON.parse(localStorage.getItem("coach_nutrition_journal") || "{}");
+      for (let d = 0; d < 7; d++) {
+        const key = weekKey(new Date(now.getTime() - d * 864e5));
+        if (journal[key] && journal[key].length > 0) {
+          nutritionDays++;
+          journal[key].forEach(e => { totalKcal += (e.total?.kcal || 0); totalProt += (e.total?.prot || 0); });
+        }
+      }
+    } catch {}
+    const avgKcal = nutritionDays > 0 ? Math.round(totalKcal / nutritionDays) : null;
+    const avgProt = nutritionDays > 0 ? Math.round(totalProt / nutritionDays) : null;
+
+    // 4. Readiness
+    let readinessScores = [];
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_readiness") || "{}");
+      for (let d = 0; d < 7; d++) {
+        const key = weekKey(new Date(now.getTime() - d * 864e5));
+        if (all[key]) readinessScores.push(all[key].total);
+      }
+    } catch {}
+    const avgReadiness = readinessScores.length > 0 ? Math.round(readinessScores.reduce((a, b) => a + b, 0) / readinessScores.length) : null;
+
+    // 5. Poids
+    let weightTrend = null;
+    try {
+      const log = JSON.parse(localStorage.getItem("coach_weight_log") || "[]");
+      const recent = log.filter(w => w.date && new Date(w.date) >= weekAgo).sort((a, b) => new Date(a.date) - new Date(b.date));
+      if (recent.length >= 2) weightTrend = { start: recent[0].weight, end: recent[recent.length - 1].weight, diff: (recent[recent.length - 1].weight - recent[0].weight).toFixed(1) };
+    } catch {}
+
+    const s = { weekSessions: weekSessions.length, totalDuree, sportsCount, muscleCount, neglected, nutritionDays, avgKcal, avgProt, avgReadiness, weightTrend };
+    setStats(s);
+
+    // Appel IA pour les insights
+    (async () => {
+      try {
+        const summary = `Bilan semaine de ${firstName} :
+- ${s.weekSessions} séances (${s.totalDuree} min total)
+- Sports : ${Object.entries(s.sportsCount).map(([k, v]) => `${k}×${v}`).join(", ") || "aucun"}
+- Muscles travaillés : ${Object.entries(s.muscleCount).map(([k, v]) => `${k}×${v}`).join(", ") || "aucun"}
+- Muscles négligés : ${s.neglected.join(", ") || "aucun"}
+- Nutrition : ${s.nutritionDays} jour(s) tracké(s), moyenne ${s.avgKcal || "?"} kcal/j et ${s.avgProt || "?"} g prot/j (cible : ~${profile?.weight ? Math.round((profile.gender === "femme" ? (10 * profile.weight + 6.25 * profile.height - 5 * profile.age - 161) : (10 * profile.weight + 6.25 * profile.height - 5 * profile.age + 5)) * 1.55) : "?"} kcal)
+- Forme moyenne : ${s.avgReadiness || "?"}%
+- Poids : ${s.weightTrend ? `${s.weightTrend.start} → ${s.weightTrend.end} kg (${s.weightTrend.diff > 0 ? "+" : ""}${s.weightTrend.diff})` : "non suivi"}
+- Objectif : ${profile?.goal || "forme"}
+Donne un bilan franc (points forts, points faibles) et 3 ajustements concrets pour la semaine prochaine. Sois direct et motivant. Réponds en 150 mots max.`;
+        const r = await fetch(API + "/api/coach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ system: "Tu es un coach sportif et nutritionniste expert. Fais un bilan hebdomadaire franc et personnalisé.", messages: [{ role: "user", content: summary }], max_tokens: 600 })
+        });
+        const data = await r.json();
+        setInsights(data.content?.[0]?.text || "Bilan indisponible.");
+      } catch { setInsights("Impossible de générer le bilan."); }
+      setLoading(false);
+    })();
+  }, []);
+
+  const s = stats;
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:"linear-gradient(135deg,#1e3a8a,#7c3aed)",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>📊 Bilan de la semaine</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.65)"}}>Les 7 derniers jours</div>
+        </div>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+        {!s ? (
+          <div style={{textAlign:"center",padding:"40px",color:C.t3}}>Collecte des données...</div>
+        ) : (
+          <>
+            {/* KPIs */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:16}}>
+              {[[s.weekSessions,"Séances",C.green],[s.totalDuree+" min","Volume",C.blue],[s.avgReadiness?s.avgReadiness+"%":"—","Forme moy.",s.avgReadiness>=70?C.green:C.orange]].map(([v,l,c])=>(
+                <div key={l} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"14px 8px",textAlign:"center"}}>
+                  <div style={{fontSize:22,fontWeight:900,color:c}}>{v}</div>
+                  <div style={{fontSize:10,color:C.t4,marginTop:2}}>{l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Sports */}
+            {Object.keys(s.sportsCount).length > 0 && (
+              <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.t3,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Sports pratiqués</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {Object.entries(s.sportsCount).map(([k,v])=>(
+                    <span key={k} style={{background:C.bg,border:`1px solid ${C.bord}`,borderRadius:8,padding:"5px 10px",fontSize:12,color:C.t2,fontWeight:600}}>{k} ×{v}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Muscles négligés */}
+            {s.neglected.length > 0 && (
+              <div style={{background:"rgba(239,68,68,0.08)",border:`1px solid ${C.red}33`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.red,textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>⚠ Muscles négligés</div>
+                <div style={{fontSize:12,color:C.t2,lineHeight:1.5}}>{s.neglected.join(", ")}</div>
+              </div>
+            )}
+
+            {/* Nutrition */}
+            <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:800,color:C.t3,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Nutrition</div>
+              {s.nutritionDays > 0 ? (
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  {[[s.nutritionDays+"/7","Jours trackés",C.blue],[s.avgKcal+" kcal","Moy./jour",C.green],[s.avgProt+"g","Protéines/j",C.orange]].map(([v,l,c])=>(
+                    <div key={l} style={{background:C.bg,borderRadius:8,padding:"8px",textAlign:"center"}}>
+                      <div style={{fontSize:14,fontWeight:800,color:c}}>{v}</div>
+                      <div style={{fontSize:9,color:C.t4}}>{l}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{fontSize:12,color:C.t4}}>Aucun repas tracké cette semaine. Utilise le Journal pour suivre tes calories.</div>
+              )}
+            </div>
+
+            {/* Poids */}
+            {s.weightTrend && (
+              <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"12px 14px",marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:800,color:C.t3,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Évolution du poids</div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <span style={{fontSize:14,color:C.t2}}>{s.weightTrend.start} kg</span>
+                  <span style={{fontSize:16,color:s.weightTrend.diff<0?C.green:s.weightTrend.diff>0?C.orange:C.t3}}>→ {s.weightTrend.end} kg ({s.weightTrend.diff>0?"+":""}{s.weightTrend.diff})</span>
+                </div>
+              </div>
+            )}
+
+            {/* Insights IA */}
+            <div style={{background:"linear-gradient(135deg,rgba(30,58,138,0.15),rgba(124,58,237,0.12))",border:`1px solid rgba(124,58,237,0.25)`,borderRadius:14,padding:"16px",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>🧠 Analyse du coach</div>
+              {loading ? (
+                <div style={{fontSize:13,color:C.t3}}>Analyse en cours...</div>
+              ) : (
+                <NutritionDisplay text={insights}/>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── SCORE DE FORME ──────────────────────────────────────────────────────────
 function ReadinessPanel({ profile, onClose, onDone }) {
   const dims = [
@@ -3659,7 +3839,7 @@ function ReadinessPanel({ profile, onClose, onDone }) {
   );
 }
 
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness}) {
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -3762,6 +3942,16 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
           <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"5px 10px",fontSize:11,color:"#fff",fontWeight:700,flexShrink:0}}>GO →</div>
         </button>
 
+        {/* Bilan hebdomadaire */}
+        <button onClick={onBilan} style={{width:"100%",background:`linear-gradient(135deg,#1e3a8a,#7c3aed)`,border:"none",borderRadius:18,padding:"16px 20px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14,marginBottom:12,boxShadow:`0 8px 24px rgba(124,58,237,0.25)`}}>
+          <div style={{fontSize:30}}>📊</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#fff",marginBottom:2,letterSpacing:"-0.3px"}}>Bilan de la semaine</div>
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.6)"}}>Séances, nutrition, forme · Analyse IA</div>
+          </div>
+          <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"5px 10px",fontSize:11,color:"#fff",fontWeight:700,flexShrink:0}}>Voir →</div>
+        </button>
+
         {/* Muscles travaillés */}
         <button onClick={onMuscles} style={{width:"100%",background:`linear-gradient(135deg,#064e3b,${C.green})`,border:"none",borderRadius:18,padding:"16px 20px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14,marginBottom:24,boxShadow:`0 8px 24px rgba(5,150,105,0.25)`}}>
           <div style={{fontSize:30}}>💪</div>
@@ -3834,6 +4024,7 @@ export default function App() {
   const [showHIIT,setShowHIIT]=useState(false);
   const [showMuscles,setShowMuscles]=useState(false);
   const [showReadiness,setShowReadiness]=useState(false);
+  const [showBilan,setShowBilan]=useState(false);
   const [todayReadiness,setTodayReadiness]=useState(null);
 
   // Charger le score du jour au démarrage
@@ -4012,6 +4203,7 @@ export default function App() {
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
       {showMuscles&&<MuscleScreen profile={profile} onClose={()=>setShowMuscles(false)}/>}
       {showReadiness&&<ReadinessPanel profile={profile} onClose={()=>setShowReadiness(false)} onDone={(entry)=>setTodayReadiness(entry)}/>}
+      {showBilan&&<BilanPanel profile={profile} firstName={firstName} token={token} onClose={()=>setShowBilan(false)}/>}
       {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send} programCals={dashboardParsed?.cals}/>}
 
       {/* Main content - no old header */}
@@ -4058,6 +4250,7 @@ export default function App() {
               onLogout={handleLogout}
               onReadiness={()=>setShowReadiness(true)}
               readiness={todayReadiness}
+              onBilan={()=>setShowBilan(true)}
             />
           )}
           {!homeScreen&&(
