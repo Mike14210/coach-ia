@@ -1209,6 +1209,51 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
   const [sessionLog, setSessionLog] = useState([]);
   const [seanceStart, setSeanceStart] = useState(null);
   const [rating, setRating] = useState(null); // [{name, sets:[{weight,reps}]}]
+  const [showLiveAdapt, setShowLiveAdapt] = useState(false);
+  const [liveAdapting, setLiveAdapting] = useState(false);
+
+  const liveAdapt = async (reason) => {
+    setShowLiveAdapt(false);
+    setLiveAdapting(true);
+    try {
+      const doneExs = seanceData.main.map((ex, i) => {
+        const logged = logData?.[ex.name];
+        return `${i+1}. ${ex.name} — ${logged ? `fait : ${logged.length} séries` : "pas encore fait"} — prévu : ${ex.sets}×${ex.reps}`;
+      }).join("\n");
+
+      let readinessNote = "";
+      try {
+        const all = JSON.parse(localStorage.getItem("coach_readiness") || "{}");
+        const today = new Date().toISOString().split("T")[0];
+        if (all[today]) readinessNote = ` Score de forme : ${all[today].total}%.`;
+      } catch {}
+
+      const adaptPrompt = `ADAPTATION EN DIRECT de la séance de ${firstName}.
+Raison : ${reason}.${readinessNote}
+Sport : ${sport} | Durée totale : ${duree} min | Équipement : ${equip.join(", ")}
+Exercices actuels et progression :
+${doneExs}
+
+CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptées à la raison donnée. Garde les exercices déjà faits. Respecte le même format JSON strict que la séance originale. Réponds UNIQUEMENT avec un tableau JSON d'exercices : [{"name":string,"sets":number,"reps":string,"rest":string,"desc":string}]. Aucun texte hors du JSON.`;
+
+      const r = await fetch(API+"/api/coach", {
+        method: "POST",
+        headers: { "Content-Type":"application/json", "Authorization":`Bearer ${token}` },
+        body: JSON.stringify({ system:"Tu es un coach sportif expert. Adapte la séance en cours. Réponds UNIQUEMENT en JSON valide.", messages:[{role:"user", content:adaptPrompt}], max_tokens:1500 })
+      });
+      const data = await r.json();
+      const text = data.content?.[0]?.text || "";
+      let t = text.trim().replace(/```json/gi,"").replace(/```/g,"").trim();
+      const a = t.indexOf("["), b = t.lastIndexOf("]");
+      if (a >= 0 && b > a) t = t.slice(a, b+1);
+      const newExs = JSON.parse(t);
+      if (Array.isArray(newExs) && newExs.length > 0) {
+        setSeanceData(prev => ({...prev, main: newExs.map(ex => ({...ex, sets: ex.sets||3, reps: ex.reps||"10", rest: ex.rest||"60s", desc: ex.desc||""}))}));
+        speak("Séance adaptée ! Les exercices ont été ajustés.");
+      }
+    } catch (e) { console.error("Live adapt error:", e); }
+    setLiveAdapting(false);
+  };
 
   useEffect(() => {
     try {
@@ -1994,6 +2039,38 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                         onSaveWeight={saveWeight}
                         onLogSet={handleLogSet}/>;
                     })}
+                  </div>
+                )}
+                {/* Adaptation live */}
+                {liveAdapting && (
+                  <div style={{textAlign:"center",padding:"16px",marginBottom:8}}>
+                    <div style={{fontSize:20,marginBottom:6}}>🔄</div>
+                    <div style={{fontSize:13,color:C.t2,fontWeight:600}}>Le coach adapte ta séance...</div>
+                  </div>
+                )}
+                {!liveAdapting && (
+                  <div style={{marginTop:8,marginBottom:8}}>
+                    {!showLiveAdapt ? (
+                      <button onClick={()=>setShowLiveAdapt(true)} style={{width:"100%",padding:"10px",background:"rgba(255,255,255,0.04)",border:`1px solid ${C.bord}`,borderRadius:10,color:C.t3,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                        🔄 Adapter la suite de la séance
+                      </button>
+                    ) : (
+                      <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:12}}>
+                        <div style={{fontSize:12,fontWeight:700,color:C.t1,marginBottom:10}}>Pourquoi adapter ?</div>
+                        {[
+                          ["😓","C'est trop dur","J'ai du mal, allège les exercices restants — moins de volume, exercices plus simples ou assistés."],
+                          ["💪","C'est trop facile","Je suis en forme, charge les exercices restants — plus de volume, plus intense."],
+                          ["🤕","Douleur / gêne","J'ai une douleur ou gêne, remplace les exercices restants par des mouvements qui n'impliquent pas la zone sensible."],
+                          ["⏱","Moins de temps","Il me reste moins de temps que prévu, raccourcis les exercices restants — garde l'essentiel, réduis les séries."]
+                        ].map(([icon,label,prompt])=>(
+                          <button key={label} onClick={()=>liveAdapt(prompt)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:C.bg,border:`1px solid ${C.bord}`,borderRadius:10,marginBottom:6,cursor:"pointer",textAlign:"left"}}>
+                            <span style={{fontSize:18,flexShrink:0}}>{icon}</span>
+                            <span style={{fontSize:13,fontWeight:600,color:C.t2}}>{label}</span>
+                          </button>
+                        ))}
+                        <button onClick={()=>setShowLiveAdapt(false)} style={{width:"100%",padding:"8px",background:"none",border:"none",color:C.t4,fontSize:11,cursor:"pointer",marginTop:2}}>Annuler</button>
+                      </div>
+                    )}
                   </div>
                 )}
                 <button onClick={()=>{setPhase("cooldown");saveSession();speak(`Excellent travail ! Place au retour au calme. ${seanceData.cooldown.duree} minutes d'étirements.`);}} style={{width:"100%",marginTop:12,padding:"12px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
