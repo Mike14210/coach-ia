@@ -611,7 +611,10 @@ function TechniqueTip({name, desc}) {
   const muscles = entry?.m;
   if (!tip) return null;
 
-  const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(name + " exercice technique tutoriel")}`;
+  const [showVideo, setShowVideo] = useState(false);
+  const searchQuery = encodeURIComponent(name + " exercice technique shorts");
+  const embedUrl = `https://www.youtube.com/embed?listType=search&list=${searchQuery}&autoplay=1`;
+  const searchUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
 
   return (
     <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
@@ -625,9 +628,25 @@ function TechniqueTip({name, desc}) {
         <div style={{marginTop:8}}>
           <p style={{fontSize:12,color:"#c7d2fe",lineHeight:1.65,margin:"0 0 8px"}}>{tip}</p>
           {muscles && <div style={{fontSize:10,color:"#818cf8",fontWeight:600,marginBottom:8}}>🎯 {muscles}</div>}
-          <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",textDecoration:"none",cursor:"pointer"}}>
-            ▶ Voir la démo vidéo
-          </a>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setShowVideo(v=>!v)} style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",cursor:"pointer"}}>
+              {showVideo?"✕ Fermer":"▶ Voir la démo"}
+            </button>
+            <a href={searchUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"rgba(255,255,255,0.05)",border:`1px solid ${C.bord}`,borderRadius:8,padding:"7px 10px",fontSize:10,fontWeight:600,color:C.t3,textDecoration:"none"}}>
+              YouTube ↗
+            </a>
+          </div>
+          {showVideo && (
+            <div style={{marginTop:10,borderRadius:10,overflow:"hidden",border:`1px solid ${C.bord}`,aspectRatio:"9/16",maxHeight:420,background:"#000"}}>
+              <iframe
+                src={embedUrl}
+                style={{width:"100%",height:"100%",border:"none"}}
+                allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                title={`Démo ${name}`}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -3680,6 +3699,226 @@ function MuscleScreen({ profile, onClose }) {
     </div>
   );
 }
+// ─── STREAKS & BADGES ────────────────────────────────────────────────────────
+function StreaksPanel({ onClose }) {
+  const [sessions, setSessions] = useState([]);
+  useEffect(() => { try { setSessions(JSON.parse(localStorage.getItem("coach_sessions") || "[]")); } catch {} }, []);
+
+  // Calcul du streak
+  const sessionDays = new Set(sessions.filter(s=>s&&s.type!=="weight"&&s.date).map(s=>new Date(s.date).toISOString().split("T")[0]));
+  let streak = 0;
+  const d = new Date();
+  // Vérifier aujourd'hui ou hier comme point de départ
+  let check = d.toISOString().split("T")[0];
+  if (!sessionDays.has(check)) {
+    d.setDate(d.getDate()-1);
+    check = d.toISOString().split("T")[0];
+  }
+  if (sessionDays.has(check)) {
+    const cd = new Date(check);
+    while (sessionDays.has(cd.toISOString().split("T")[0])) { streak++; cd.setDate(cd.getDate()-1); }
+  }
+
+  const totalSessions = sessions.filter(s=>s&&s.type!=="weight").length;
+  const totalMinutes = sessions.filter(s=>s&&s.type!=="weight").reduce((a,s)=>a+(s.duree||0),0);
+  const uniqueSports = new Set(sessions.filter(s=>s&&s.type!=="weight"&&s.sport).map(s=>s.sport)).size;
+
+  // Badges
+  const BADGES = [
+    { id:"first",    icon:"🎯", label:"Première séance",   desc:"Terminer sa première séance",         check:totalSessions>=1 },
+    { id:"streak3",  icon:"🔥", label:"3 jours d'affilée", desc:"Streak de 3 jours consécutifs",       check:streak>=3 },
+    { id:"streak7",  icon:"⚡", label:"Semaine parfaite",  desc:"Streak de 7 jours consécutifs",       check:streak>=7 },
+    { id:"streak14", icon:"💎", label:"2 semaines !!",     desc:"Streak de 14 jours consécutifs",      check:streak>=14 },
+    { id:"streak30", icon:"👑", label:"Un mois de feu",    desc:"Streak de 30 jours consécutifs",      check:streak>=30 },
+    { id:"ten",      icon:"💪", label:"10 séances",        desc:"Compléter 10 séances au total",       check:totalSessions>=10 },
+    { id:"twenty",   icon:"🏆", label:"25 séances",        desc:"Compléter 25 séances au total",       check:totalSessions>=25 },
+    { id:"fifty",    icon:"🥇", label:"50 séances",        desc:"Compléter 50 séances au total",       check:totalSessions>=50 },
+    { id:"century",  icon:"💯", label:"100 séances",       desc:"Compléter 100 séances au total",      check:totalSessions>=100 },
+    { id:"multi",    icon:"🌈", label:"Polyvalent",        desc:"Pratiquer 3 sports différents",       check:uniqueSports>=3 },
+    { id:"multi5",   icon:"🦄", label:"Athlète complet",   desc:"Pratiquer 5 sports différents",       check:uniqueSports>=5 },
+    { id:"hours10",  icon:"⏰", label:"10h d'effort",      desc:"Cumuler 600 minutes d'entraînement",  check:totalMinutes>=600 },
+    { id:"hours25",  icon:"🕐", label:"25h d'effort",      desc:"Cumuler 1500 minutes d'entraînement", check:totalMinutes>=1500 },
+  ];
+  const earned = BADGES.filter(b=>b.check);
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:"linear-gradient(135deg,#b45309,#f59e0b)",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>🔥 Streaks & Badges</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.65)"}}>{earned.length}/{BADGES.length} badges débloqués</div>
+        </div>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+        {/* Streak actuel */}
+        <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:16,padding:"24px 16px",textAlign:"center",marginBottom:16}}>
+          <div style={{fontSize:56,fontWeight:900,color:streak>=7?C.green:streak>=3?"#f59e0b":C.t1,lineHeight:1}}>{streak}</div>
+          <div style={{fontSize:14,fontWeight:700,color:C.t2,marginTop:4}}>jour{streak!==1?"s":""} d'affilée</div>
+          <div style={{fontSize:11,color:C.t4,marginTop:6}}>
+            {streak===0?"Lance-toi ! Fais ta première séance aujourd'hui.":streak<3?"Continue comme ça !":streak<7?"Beau streak, tiens bon !":"Tu es une machine 🔥"}
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:20}}>
+          {[[totalSessions,"Séances",C.green],[Math.round(totalMinutes/60)+"h","Entraînement",C.blue],[uniqueSports,"Sports",C.orange]].map(([v,l,c])=>(
+            <div key={l} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"12px 8px",textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:900,color:c}}>{v}</div>
+              <div style={{fontSize:10,color:C.t4}}>{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Badges */}
+        <div style={{fontSize:12,fontWeight:800,color:C.t2,textTransform:"uppercase",letterSpacing:".06em",marginBottom:12}}>Badges</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {BADGES.map(b=>(
+            <div key={b.id} style={{background:b.check?C.surf:"rgba(255,255,255,0.02)",border:`1px solid ${b.check?C.bord:"rgba(255,255,255,0.04)"}`,borderRadius:12,padding:"14px 12px",textAlign:"center",opacity:b.check?1:0.4}}>
+              <div style={{fontSize:28,marginBottom:4,filter:b.check?"none":"grayscale(1)"}}>{b.icon}</div>
+              <div style={{fontSize:12,fontWeight:700,color:b.check?C.t1:C.t4}}>{b.label}</div>
+              <div style={{fontSize:10,color:C.t4,marginTop:2}}>{b.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PHOTOS DE PROGRESSION ──────────────────────────────────────────────────
+function ProgressPhotos({ profile, token, onClose }) {
+  const [photos, setPhotos] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [analysis, setAnalysis] = useState(null);
+  const photoRef = useRef(null);
+
+  useEffect(() => { try { setPhotos(JSON.parse(localStorage.getItem("coach_progress_photos") || "[]")); } catch {} }, []);
+
+  const savePhotos = (p) => {
+    setPhotos(p);
+    try { localStorage.setItem("coach_progress_photos", JSON.stringify(p)); } catch {}
+  };
+
+  const addPhoto = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 600;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) { const r = Math.min(MAX/w, MAX/h); w = Math.round(w*r); h = Math.round(h*r); }
+        const cvs = document.createElement("canvas");
+        cvs.width = w; cvs.height = h;
+        cvs.getContext("2d").drawImage(img, 0, 0, w, h);
+        const compressed = cvs.toDataURL("image/jpeg", 0.6);
+        const entry = { id: Date.now(), date: new Date().toISOString().split("T")[0], data: compressed };
+        savePhotos([...photos, entry].slice(-24)); // garder 24 max (~2 ans mensuel)
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const deletePhoto = (id) => savePhotos(photos.filter(p => p.id !== id));
+
+  const compare = async () => {
+    if (photos.length < 2) return;
+    setLoading(true); setAnalysis(null);
+    const first = photos[0], last = photos[photos.length-1];
+    try {
+      const r = await fetch(API+"/api/coach", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
+        body:JSON.stringify({
+          system:"Tu es un coach sportif expert en transformation physique. Compare ces deux photos (avant/après). Sois encourageant mais honnête. Note les changements visibles (posture, volume musculaire, tour de taille, épaules, etc). 3-4 phrases max.",
+          messages:[{role:"user", content:[
+            {type:"image", source:{type:"base64", media_type:"image/jpeg", data:first.data.split(",")[1]}},
+            {type:"image", source:{type:"base64", media_type:"image/jpeg", data:last.data.split(",")[1]}},
+            {type:"text", text:`Compare ma progression. Photo 1 : ${first.date}. Photo 2 : ${last.date}. Objectif : ${profile?.goal||"forme"}. Poids actuel : ${profile?.weight||"?"}kg.`}
+          ]}],
+          max_tokens:500
+        })
+      });
+      const data = await r.json();
+      setAnalysis(data.content?.[0]?.text || "Analyse indisponible.");
+    } catch { setAnalysis("L'analyse photo n'est pas disponible (le serveur ne supporte peut-être pas les images). Continue à prendre tes photos, la comparaison visuelle reste précieuse !"); }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:"linear-gradient(135deg,#6d28d9,#a78bfa)",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>📸 Photos de progression</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.65)"}}>{photos.length} photo{photos.length!==1?"s":""} · Compare ta transformation</div>
+        </div>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
+        <input type="file" accept="image/*" capture="environment" ref={photoRef} onChange={addPhoto} style={{display:"none"}}/>
+
+        <button onClick={()=>photoRef.current?.click()} style={{width:"100%",padding:"16px",background:"rgba(167,139,250,0.12)",border:`1.5px dashed rgba(167,139,250,0.4)`,borderRadius:14,cursor:"pointer",textAlign:"center",marginBottom:16}}>
+          <div style={{fontSize:28,marginBottom:4}}>📷</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#a78bfa"}}>Prendre une photo de progression</div>
+          <div style={{fontSize:11,color:C.t4,marginTop:2}}>Face, profil ou dos — toujours au même endroit pour comparer</div>
+        </button>
+
+        {/* Comparaison avant/après */}
+        {photos.length >= 2 && (
+          <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:14,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:800,color:C.t2,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Avant / Après</div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              {[photos[0], photos[photos.length-1]].map((p,i)=>(
+                <div key={i} style={{flex:1,borderRadius:10,overflow:"hidden",border:`1px solid ${C.bord}`,position:"relative"}}>
+                  <img src={p.data} alt={i===0?"Avant":"Après"} style={{width:"100%",display:"block"}}/>
+                  <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,0.7)",padding:"4px 8px",fontSize:10,color:"#fff",fontWeight:600}}>
+                    {i===0?"Début":"Maintenant"} · {p.date}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button onClick={compare} disabled={loading} style={{width:"100%",padding:"11px",background:"rgba(167,139,250,0.15)",border:`1px solid rgba(167,139,250,0.3)`,borderRadius:10,color:"#a78bfa",fontWeight:700,fontSize:13,cursor:loading?"not-allowed":"pointer"}}>
+              {loading?"🔄 Analyse en cours...":"🧠 Analyse IA de ma progression"}
+            </button>
+            {analysis && (
+              <div style={{marginTop:10,background:C.bg,borderRadius:10,padding:"10px 12px",fontSize:12,color:C.t2,lineHeight:1.6}}>
+                {analysis}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Timeline */}
+        {photos.length > 0 ? (
+          <div>
+            <div style={{fontSize:12,fontWeight:800,color:C.t2,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Timeline</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {[...photos].reverse().map(p=>(
+                <div key={p.id} style={{borderRadius:10,overflow:"hidden",border:`1px solid ${C.bord}`,position:"relative"}}>
+                  <img src={p.data} alt={p.date} style={{width:"100%",display:"block",aspectRatio:"3/4",objectFit:"cover"}}/>
+                  <div style={{position:"absolute",bottom:0,left:0,right:0,background:"rgba(0,0,0,0.7)",padding:"3px 6px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:9,color:"#fff",fontWeight:600}}>{p.date}</span>
+                    <button onClick={()=>deletePhoto(p.id)} style={{background:"none",border:"none",color:"rgba(255,255,255,0.5)",fontSize:12,cursor:"pointer",padding:0}}>✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div style={{textAlign:"center",padding:"36px 20px"}}>
+            <div style={{fontSize:44,marginBottom:12}}>📸</div>
+            <div style={{fontSize:14,fontWeight:700,color:C.t2,marginBottom:6}}>Pas encore de photo</div>
+            <div style={{fontSize:13,color:C.t4,lineHeight:1.5}}>Prends une photo chaque mois pour suivre ta transformation. Le coach IA pourra analyser ta progression.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── BILAN HEBDOMADAIRE ──────────────────────────────────────────────────────
 function BilanPanel({ profile, firstName, token, onClose, programCals }) {
   const [loading, setLoading] = useState(true);
@@ -3935,7 +4174,7 @@ function ReadinessPanel({ profile, onClose, onDone }) {
   );
 }
 
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan}) {
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan, onStreaks, streakCount, onPhotos}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -4038,6 +4277,20 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
           <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"5px 10px",fontSize:11,color:"#fff",fontWeight:700,flexShrink:0}}>GO →</div>
         </button>
 
+        {/* Streaks & Photos */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <button onClick={onStreaks} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:"14px 12px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:4}}>🔥</div>
+            <div style={{fontSize:22,fontWeight:900,color:streakCount>=7?C.green:streakCount>=3?"#f59e0b":C.t1}}>{streakCount||0}</div>
+            <div style={{fontSize:10,color:C.t4}}>Streak</div>
+          </button>
+          <button onClick={onPhotos} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:"14px 12px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:4}}>📸</div>
+            <div style={{fontSize:12,fontWeight:700,color:C.t2,marginTop:2}}>Progression</div>
+            <div style={{fontSize:10,color:C.t4}}>Photos avant/après</div>
+          </button>
+        </div>
+
         {/* Bilan hebdomadaire */}
         <button onClick={onBilan} style={{width:"100%",background:`linear-gradient(135deg,#1e3a8a,#7c3aed)`,border:"none",borderRadius:18,padding:"16px 20px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14,marginBottom:12,boxShadow:`0 8px 24px rgba(124,58,237,0.25)`}}>
           <div style={{fontSize:30}}>📊</div>
@@ -4121,6 +4374,26 @@ export default function App() {
   const [showMuscles,setShowMuscles]=useState(false);
   const [showReadiness,setShowReadiness]=useState(false);
   const [showBilan,setShowBilan]=useState(false);
+  const [showStreaks,setShowStreaks]=useState(false);
+  const [showPhotos,setShowPhotos]=useState(false);
+  const [streakCount,setStreakCount]=useState(0);
+
+  // Calculer le streak au démarrage
+  useEffect(() => {
+    try {
+      const sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]");
+      const days = new Set(sessions.filter(s=>s&&s.type!=="weight"&&s.date).map(s=>new Date(s.date).toISOString().split("T")[0]));
+      let s = 0;
+      const d = new Date();
+      let check = d.toISOString().split("T")[0];
+      if (!days.has(check)) { d.setDate(d.getDate()-1); check = d.toISOString().split("T")[0]; }
+      if (days.has(check)) {
+        const cd = new Date(check);
+        while (days.has(cd.toISOString().split("T")[0])) { s++; cd.setDate(cd.getDate()-1); }
+      }
+      setStreakCount(s);
+    } catch {}
+  }, []);
   const [todayReadiness,setTodayReadiness]=useState(null);
 
   // Charger le score du jour au démarrage
@@ -4300,6 +4573,8 @@ export default function App() {
       {showMuscles&&<MuscleScreen profile={profile} onClose={()=>setShowMuscles(false)}/>}
       {showReadiness&&<ReadinessPanel profile={profile} onClose={()=>setShowReadiness(false)} onDone={(entry)=>setTodayReadiness(entry)}/>}
       {showBilan&&<BilanPanel profile={profile} firstName={firstName} token={token} onClose={()=>setShowBilan(false)} programCals={dashboardParsed?.cals}/>}
+      {showStreaks&&<StreaksPanel onClose={()=>setShowStreaks(false)}/>}
+      {showPhotos&&<ProgressPhotos profile={profile} token={token} onClose={()=>setShowPhotos(false)}/>}
       {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send} programCals={dashboardParsed?.cals}/>}
 
       {/* Main content - no old header */}
@@ -4347,6 +4622,9 @@ export default function App() {
               onReadiness={()=>setShowReadiness(true)}
               readiness={todayReadiness}
               onBilan={()=>setShowBilan(true)}
+              onStreaks={()=>setShowStreaks(true)}
+              streakCount={streakCount}
+              onPhotos={()=>setShowPhotos(true)}
             />
           )}
           {!homeScreen&&(
