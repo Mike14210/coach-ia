@@ -190,7 +190,7 @@ Lundi : Séance A
 Mercredi : Séance B
 [/WEEK]
 [SESSION name="Séance A — Nom" color="bleu"]
-[EX name="Nom exercice" sets="3" reps="10-12" rest="75s"]Description technique courte[/EX]
+[EX name="Nom exercice" sets="3" reps="10-12" rest="75s"]Description technique détaillée : position de départ, mouvement, erreurs à éviter, muscles ciblés[/EX]
 [/SESSION]
 [PROG]progression en 2-3 phrases[/PROG]`;
 }
@@ -580,25 +580,38 @@ function YoutubeEmbed({videoId, title}) {
 function TechniqueTip({name, desc}) {
   const [expanded, setExpanded] = useState(false);
   const tips = {
-    "Squat gobelet": "Pieds largeur d'épaules, orteils légèrement ouverts. Haltère contre la poitrine. Descends jusqu'à ce que les cuisses soient parallèles au sol en gardant le dos droit. Genoux dans l'axe des orteils.",
-    "Développé militaire": "Haltères à hauteur d'épaules, paumes vers l'avant. Pousse verticalement sans cambrer le dos. Verrouille les coudes en haut. Descente lente et contrôlée.",
-    "Rowing haltère": "Un genou et une main sur le banc. Dos plat, parallèle au sol. Tire le coude vers le haut en gardant le bras proche du corps. Squeeze l'omoplate en haut.",
-    "Curl biceps": "Coudes fixes contre le buste. Monte en tournant légèrement le poignet. Descente lente sur 3 secondes. Ne balance pas le dos.",
-    "Extension triceps": "Bras tendu au-dessus de la tête. Coude fixe. Descends l'haltère derrière la nuque. Pousse en contractant le triceps.",
-    "Pompes": "Mains largeur d'épaules, corps gainé. Descends jusqu'à frôler le sol. Coudes à 45° du corps. Ne laisse pas les hanches s'affaisser.",
-    "Planche": "Avant-bras au sol, coudes sous les épaules. Corps parfaitement aligné. Contracte les abdos et les fessiers. Respire normalement.",
-    "Fentes marchées": "Grand pas en avant. Genou arrière proche du sol sans toucher. Genou avant dans l'axe du pied. Pousse sur le talon avant pour revenir.",
-    "Soulevé de terre roumain": "Haltères devant les cuisses. Descends en gardant le dos plat et les haltères proches des jambes. Sens l'étirement dans les ischio-jambiers. Remonte en poussant les hanches.",
-    "Hip thrust": "Épaules sur le banc, haltère sur le bassin. Pieds à plat. Pousse les hanches vers le haut en contractant les fessiers. Descente contrôlée.",
-    "Élévations latérales": "Légère flexion des coudes. Monte les bras à hauteur d'épaules, pas plus haut. Descente lente. Contrôle le mouvement, ne balance pas.",
-    "Développé couché": "Haltères à hauteur des pectoraux, coudes à 75°. Pousse en rapprochant légèrement les haltères en haut. Descente en 3 secondes.",
-    "Burpees": "Debout → mains au sol → saut en planche → pompe → saut pieds vers les mains → saut vertical les bras en l'air. Enchaîne sans pause.",
-    "Mountain climbers": "Position de pompe. Ramène alternativement les genoux vers la poitrine le plus vite possible. Garde les hanches basses et le dos plat.",
-    "Squats sautés": "Descends en squat normal. Explose vers le haut en sautant. Atterris doucement en fléchissant les genoux. Enchaîne immédiatement.",
+    "Squat gobelet": {t:"Pieds largeur d'épaules, orteils légèrement ouverts. Haltère contre la poitrine. Descends jusqu'à ce que les cuisses soient parallèles au sol en gardant le dos droit. Genoux dans l'axe des orteils.",m:"Quadriceps, Fessiers, Ischio-jambiers"},
+    "Développé militaire": {t:"Haltères à hauteur d'épaules, paumes vers l'avant. Pousse verticalement sans cambrer le dos. Verrouille les coudes en haut. Descente lente et contrôlée.",m:"Épaules, Triceps"},
+    "Rowing haltère": {t:"Un genou et une main sur le banc. Dos plat, parallèle au sol. Tire le coude vers le haut en gardant le bras proche du corps. Squeeze l'omoplate en haut.",m:"Dos, Biceps"},
+    "Curl biceps": {t:"Coudes fixes contre le buste. Monte en tournant légèrement le poignet. Descente lente sur 3 secondes. Ne balance pas le dos.",m:"Biceps"},
+    "Extension triceps": {t:"Bras tendu au-dessus de la tête. Coude fixe. Descends l'haltère derrière la nuque. Pousse en contractant le triceps.",m:"Triceps"},
+    "Pompes": {t:"Mains largeur d'épaules, corps gainé. Descends jusqu'à frôler le sol. Coudes à 45° du corps. Ne laisse pas les hanches s'affaisser.",m:"Pectoraux, Triceps, Épaules"},
+    "Planche": {t:"Avant-bras au sol, coudes sous les épaules. Corps parfaitement aligné. Contracte les abdos et les fessiers. Respire normalement.",m:"Abdominaux, Dos"},
+    "Fentes marchées": {t:"Grand pas en avant. Genou arrière proche du sol sans toucher. Genou avant dans l'axe du pied. Pousse sur le talon avant pour revenir.",m:"Quadriceps, Fessiers"},
+    "Soulevé de terre roumain": {t:"Haltères devant les cuisses. Descends en gardant le dos plat et les haltères proches des jambes. Sens l'étirement dans les ischio-jambiers. Remonte en poussant les hanches.",m:"Ischio-jambiers, Fessiers, Dos"},
+    "Hip thrust": {t:"Épaules sur le banc, haltère sur le bassin. Pieds à plat. Pousse les hanches vers le haut en contractant les fessiers. Descente contrôlée.",m:"Fessiers, Ischio-jambiers"},
+    "Élévations latérales": {t:"Légère flexion des coudes. Monte les bras à hauteur d'épaules, pas plus haut. Descente lente. Contrôle le mouvement, ne balance pas.",m:"Épaules"},
+    "Développé couché": {t:"Haltères à hauteur des pectoraux, coudes à 75°. Pousse en rapprochant légèrement les haltères en haut. Descente en 3 secondes.",m:"Pectoraux, Triceps, Épaules"},
+    "Burpees": {t:"Debout → mains au sol → saut en planche → pompe → saut pieds vers les mains → saut vertical les bras en l'air. Enchaîne sans pause.",m:"Corps entier"},
+    "Mountain climbers": {t:"Position de pompe. Ramène alternativement les genoux vers la poitrine le plus vite possible. Garde les hanches basses et le dos plat.",m:"Abdominaux, Épaules"},
+    "Squats sautés": {t:"Descends en squat normal. Explose vers le haut en sautant. Atterris doucement en fléchissant les genoux. Enchaîne immédiatement.",m:"Quadriceps, Fessiers, Mollets"},
+    "Tirage horizontal": {t:"Assis, dos droit, tire la barre vers le nombril en serrant les omoplates. Coudes proches du corps. Retour lent et contrôlé.",m:"Dos, Biceps"},
+    "Presse à cuisses": {t:"Dos plaqué contre le dossier. Pieds à largeur d'épaules sur la plateforme. Descends à 90° sans décoller les fesses. Pousse sans verrouiller les genoux.",m:"Quadriceps, Fessiers"},
+    "Dips": {t:"Barres parallèles, corps légèrement penché en avant. Descends jusqu'à 90° aux coudes. Pousse en contractant pectoraux et triceps. Contrôle la descente.",m:"Pectoraux, Triceps"},
+    "Tractions": {t:"Prise pronation, largeur d'épaules. Tire le menton au-dessus de la barre en engageant le dos. Descente lente sur 3 secondes.",m:"Dos, Biceps"},
+    "Crunchs": {t:"Allongé, genoux fléchis, mains derrière la tête sans tirer sur la nuque. Enroule le buste en contractant les abdos. Mouvement court et contrôlé.",m:"Abdominaux"},
+    "Mollets debout": {t:"Debout sur un rebord, talons dans le vide. Monte sur la pointe des pieds en contractant les mollets. Descente lente sous le niveau du rebord.",m:"Mollets"},
+    "Gainage latéral": {t:"Avant-bras au sol, corps aligné de côté. Hanche haute, ne pas s'affaisser. Contracte les obliques. Maintiens la position.",m:"Abdominaux, Obliques"},
+    "Leg curl": {t:"Allongé face contre terre, cale bien les chevilles. Remonte les talons vers les fessiers en contractant les ischio-jambiers. Descente lente.",m:"Ischio-jambiers"},
+    "Face pull": {t:"Poulie haute, corde. Tire vers le visage en écartant les mains. Coudes hauts, contracte l'arrière des épaules. Retour lent.",m:"Épaules, Dos"},
   };
 
-  const tip = tips[name] || desc;
+  const entry = tips[name];
+  const tip = entry?.t || desc;
+  const muscles = entry?.m;
   if (!tip) return null;
+
+  const youtubeUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(name + " exercice technique tutoriel")}`;
 
   return (
     <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
@@ -609,7 +622,13 @@ function TechniqueTip({name, desc}) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2.5" style={{transform:expanded?"rotate(180deg)":"none",transition:"transform .2s",flexShrink:0}}><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       {expanded && (
-        <p style={{fontSize:12,color:"#c7d2fe",lineHeight:1.65,margin:"8px 0 0"}}>{tip}</p>
+        <div style={{marginTop:8}}>
+          <p style={{fontSize:12,color:"#c7d2fe",lineHeight:1.65,margin:"0 0 8px"}}>{tip}</p>
+          {muscles && <div style={{fontSize:10,color:"#818cf8",fontWeight:600,marginBottom:8}}>🎯 {muscles}</div>}
+          <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",textDecoration:"none",cursor:"pointer"}}>
+            ▶ Voir la démo vidéo
+          </a>
+        </div>
       )}
     </div>
   );
