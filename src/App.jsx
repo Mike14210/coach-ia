@@ -3585,7 +3585,7 @@ function MuscleScreen({ profile, onClose }) {
   );
 }
 // ─── BILAN HEBDOMADAIRE ──────────────────────────────────────────────────────
-function BilanPanel({ profile, firstName, token, onClose }) {
+function BilanPanel({ profile, firstName, token, onClose, programCals }) {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [insights, setInsights] = useState(null);
@@ -3657,7 +3657,7 @@ function BilanPanel({ profile, firstName, token, onClose }) {
 - Sports : ${Object.entries(s.sportsCount).map(([k, v]) => `${k}×${v}`).join(", ") || "aucun"}
 - Muscles travaillés : ${Object.entries(s.muscleCount).map(([k, v]) => `${k}×${v}`).join(", ") || "aucun"}
 - Muscles négligés : ${s.neglected.join(", ") || "aucun"}
-- Nutrition : ${s.nutritionDays} jour(s) tracké(s), moyenne ${s.avgKcal || "?"} kcal/j et ${s.avgProt || "?"} g prot/j (cible : ~${profile?.weight ? Math.round((profile.gender === "femme" ? (10 * profile.weight + 6.25 * profile.height - 5 * profile.age - 161) : (10 * profile.weight + 6.25 * profile.height - 5 * profile.age + 5)) * 1.55) : "?"} kcal)
+- Nutrition : ${s.nutritionDays} jour(s) tracké(s), moyenne ${s.avgKcal || "?"} kcal/j et ${s.avgProt || "?"} g prot/j (cible programme : ${programCals?.cible || "?"} kcal/j et ${programCals?.prot || "?"}g prot/j)
 - Forme moyenne : ${s.avgReadiness || "?"}%
 - Poids : ${s.weightTrend ? `${s.weightTrend.start} → ${s.weightTrend.end} kg (${s.weightTrend.diff > 0 ? "+" : ""}${s.weightTrend.diff})` : "non suivi"}
 - Objectif : ${profile?.goal || "forme"}
@@ -4203,7 +4203,7 @@ export default function App() {
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
       {showMuscles&&<MuscleScreen profile={profile} onClose={()=>setShowMuscles(false)}/>}
       {showReadiness&&<ReadinessPanel profile={profile} onClose={()=>setShowReadiness(false)} onDone={(entry)=>setTodayReadiness(entry)}/>}
-      {showBilan&&<BilanPanel profile={profile} firstName={firstName} token={token} onClose={()=>setShowBilan(false)}/>}
+      {showBilan&&<BilanPanel profile={profile} firstName={firstName} token={token} onClose={()=>setShowBilan(false)} programCals={dashboardParsed?.cals}/>}
       {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send} programCals={dashboardParsed?.cals}/>}
 
       {/* Main content - no old header */}
