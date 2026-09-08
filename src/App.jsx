@@ -612,9 +612,9 @@ function TechniqueTip({name, desc}) {
   if (!tip) return null;
 
   const [showVideo, setShowVideo] = useState(false);
-  const searchQuery = encodeURIComponent(name + " exercice technique shorts");
-  const embedUrl = `https://www.youtube.com/embed?listType=search&list=${searchQuery}&autoplay=1`;
+  const searchQuery = encodeURIComponent(name + " exercice technique");
   const searchUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
+  const shortsUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(name + " exercice shorts")}`;
 
   return (
     <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
@@ -629,24 +629,13 @@ function TechniqueTip({name, desc}) {
           <p style={{fontSize:12,color:"#c7d2fe",lineHeight:1.65,margin:"0 0 8px"}}>{tip}</p>
           {muscles && <div style={{fontSize:10,color:"#818cf8",fontWeight:600,marginBottom:8}}>🎯 {muscles}</div>}
           <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setShowVideo(v=>!v)} style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",cursor:"pointer"}}>
-              {showVideo?"✕ Fermer":"▶ Voir la démo"}
-            </button>
-            <a href={searchUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"rgba(255,255,255,0.05)",border:`1px solid ${C.bord}`,borderRadius:8,padding:"7px 10px",fontSize:10,fontWeight:600,color:C.t3,textDecoration:"none"}}>
-              YouTube ↗
+            <a href={searchUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",textDecoration:"none",cursor:"pointer"}}>
+              ▶ Voir la démo
+            </a>
+            <a href={shortsUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"rgba(255,255,255,0.05)",border:`1px solid ${C.bord}`,borderRadius:8,padding:"7px 10px",fontSize:10,fontWeight:600,color:C.t3,textDecoration:"none"}}>
+              Shorts ↗
             </a>
           </div>
-          {showVideo && (
-            <div style={{marginTop:10,borderRadius:10,overflow:"hidden",border:`1px solid ${C.bord}`,aspectRatio:"9/16",maxHeight:420,background:"#000"}}>
-              <iframe
-                src={embedUrl}
-                style={{width:"100%",height:"100%",border:"none"}}
-                allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-                title={`Démo ${name}`}
-              />
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -1189,7 +1178,6 @@ function SeanceExCard({ex, idx, accent, onSaveWeight, savedWeight, onLogSet}) {
       </div>
       {open && (
         <div style={{borderTop:"1px solid rgba(255,255,255,0.1)",padding:"12px 14px"}}>
-          {ex.desc&&<p style={{fontSize:12,color:"#9ca3af",marginBottom:10,lineHeight:1.5}}>{ex.desc}</p>}
           <TechniqueTip name={ex.name} desc={ex.desc}/>
           <div style={{fontSize:11,fontWeight:700,color:accent,marginBottom:8}}>{sets.filter(Boolean).length}/{totalSets} séries complétées</div>
           {sets.map((s,i)=>(
@@ -1249,6 +1237,37 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
   const [rating, setRating] = useState(null); // [{name, sets:[{weight,reps}]}]
   const [showLiveAdapt, setShowLiveAdapt] = useState(false);
   const [liveAdapting, setLiveAdapting] = useState(false);
+  const [showAddEx, setShowAddEx] = useState(false);
+  const [addExInput, setAddExInput] = useState("");
+  const [addExLoading, setAddExLoading] = useState(false);
+
+  const addExercise = async () => {
+    if (!addExInput.trim()) return;
+    setAddExLoading(true);
+    try {
+      const r = await fetch(API+"/api/coach", {
+        method:"POST",
+        headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
+        body:JSON.stringify({
+          system:"Tu es un coach sportif expert. Génère UN SEUL exercice au format JSON strict : {\"name\":string,\"sets\":number,\"reps\":string,\"rest\":string,\"desc\":string}. Description technique détaillée. Aucun texte hors du JSON.",
+          messages:[{role:"user",content:`Ajoute un exercice : ${addExInput}. Sport : ${sport}. Équipement : ${equip.join(", ")}. Adapte au niveau ${profile?.level||"intermédiaire"}.`}],
+          max_tokens:500
+        })
+      });
+      const data = await r.json();
+      const text = (data.content?.[0]?.text||"").trim().replace(/```json/gi,"").replace(/```/g,"").trim();
+      const a = text.indexOf("{"), b = text.lastIndexOf("}");
+      if (a>=0 && b>a) {
+        const ex = JSON.parse(text.slice(a,b+1));
+        if (ex && ex.name) {
+          setSeanceData(prev=>({...prev, main:[...prev.main, {...ex, sets:ex.sets||3, reps:ex.reps||"10", rest:ex.rest||"60s", desc:ex.desc||""}]}));
+          setAddExInput(""); setShowAddEx(false);
+          speak(`Exercice ajouté : ${ex.name}`);
+        }
+      }
+    } catch(e) { console.error("addEx error:", e); }
+    setAddExLoading(false);
+  };
 
   const liveAdapt = async (reason) => {
     setShowLiveAdapt(false);
@@ -1969,6 +1988,16 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
             {/* Warmup */}
             {phase==="warmup" && (
               <div>
+                {seanceData.warmup.exercices.length === 0 ? (
+                  <div style={{textAlign:"center",padding:"20px"}}>
+                    <div style={{fontSize:14,fontWeight:700,color:C.t1,marginBottom:8}}>🔥 Échauffement — {seanceData.warmup.duree||5} min</div>
+                    <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.5}}>Fais {seanceData.warmup.duree||5} minutes d'échauffement articulaire et cardio léger (rotation des bras, montées de genoux, jumping jacks).</div>
+                    <button onClick={()=>{setSeanceStart(Date.now());setPhase("main");speak(`Échauffement terminé. Séance principale. ${seanceData.main.length} exercices. C'est parti ${firstName} !`);}} style={{padding:"12px 28px",background:C.orange,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+                      ✓ Échauffement fait — Lancer la séance
+                    </button>
+                  </div>
+                ) : (
+                <>
                 {/* Progress bar */}
                 <div style={{display:"flex",gap:4,marginBottom:12}}>
                   {seanceData.warmup.exercices.map((_,i)=>(
@@ -2036,6 +2065,8 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   style={{width:"100%",marginTop:14,padding:"12px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
                   Passer à la séance principale →
                 </button>
+                </>
+                )}
               </div>
             )}
 
@@ -2063,7 +2094,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                             <div style={{fontSize:11,color:"#9ca3af",marginTop:1}}>{ex.reps}</div>
                           </div>
                         </div>
-                        {ex.desc&&<p style={{fontSize:11,color:"#9ca3af",lineHeight:1.6,margin:"8px 0 0"}}>{ex.desc}</p>}
+                        <TechniqueTip name={ex.name} desc={ex.desc}/>
                       </div>
                     ))}
                   </div>
@@ -2111,6 +2142,26 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                     )}
                   </div>
                 )}
+
+                {/* Ajouter un exercice */}
+                {!showAddEx ? (
+                  <button onClick={()=>setShowAddEx(true)} style={{width:"100%",marginTop:4,marginBottom:4,padding:"10px",background:"rgba(255,255,255,0.04)",border:`1px dashed ${C.bord}`,borderRadius:10,color:C.t3,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                    + Ajouter un exercice
+                  </button>
+                ) : (
+                  <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:12,marginTop:4,marginBottom:4}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.t1,marginBottom:8}}>Quel exercice ajouter ?</div>
+                    <input value={addExInput} onChange={e=>setAddExInput(e.target.value)} placeholder="Ex : abdos, gainage, mollets, tirage..."
+                      style={{width:"100%",background:C.bg,border:`1px solid ${C.bord}`,borderRadius:8,padding:"9px 12px",color:C.t1,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",marginBottom:8}}/>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={addExercise} disabled={addExLoading||!addExInput.trim()} style={{flex:1,padding:"10px",background:C.green,border:"none",borderRadius:8,color:"#fff",fontWeight:700,fontSize:12,cursor:addExLoading?"not-allowed":"pointer"}}>
+                        {addExLoading?"⏳ Génération...":"✓ Ajouter"}
+                      </button>
+                      <button onClick={()=>{setShowAddEx(false);setAddExInput("");}} style={{padding:"10px 14px",background:C.surfHigh,border:`1px solid ${C.bord}`,borderRadius:8,color:C.t3,fontSize:12,cursor:"pointer"}}>✕</button>
+                    </div>
+                  </div>
+                )}
+
                 <button onClick={()=>{setPhase("cooldown");saveSession();speak(`Excellent travail ! Place au retour au calme. ${seanceData.cooldown.duree} minutes d'étirements.`);}} style={{width:"100%",marginTop:12,padding:"12px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
                   Retour au calme →
                 </button>
@@ -2967,9 +3018,9 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
         method:"POST",
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
         body: JSON.stringify({
-          system: `Tu es un coach sportif expert. ${firstName} a un programme personnalisé. Réponds en français, de façon directe et pratique.`,
+          system: `Tu es un coach sportif expert. ${firstName} a un programme personnalisé. Réponds en français, de façon directe et pratique. Ne pose jamais de question si tu as les infos pour répondre. Génère directement les séances quand on te le demande.`,
           messages: [...newMsgs],
-          max_tokens: 800
+          max_tokens: 2000
         })
       });
       const data = await r.json();
@@ -3162,12 +3213,23 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
             <button onClick={()=>{
               setShowAdapt(false);
               const parts=[];
-              if(adaptTime) parts.push(`je n'ai que ${adaptTime} min aujourd'hui`);
-              if(adaptEquip) parts.push(`je n'ai accès qu'à : ${adaptEquip}`);
+              if(adaptTime) parts.push(`temps dispo : ${adaptTime} min`);
+              if(adaptEquip) parts.push(`matériel : ${adaptEquip}`);
               try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:adaptTime,equip:adaptEquip}));}catch{}
-              const cons=parts.length?parts.join(" et "):"des conditions inhabituelles aujourd'hui";
+              const cons=parts.length?parts.join(", "):"conditions inhabituelles";
+              // Construire le contexte du programme
+              const seances = parsed?.sessions?.map((s,i)=>`Séance ${i+1}: ${s.name} — ${(s.exercises||[]).map(e=>e.name).join(", ")}`).join("\n") || "Non disponible";
+              const directPrompt = `INSTRUCTION STRICTE : Ne pose AUCUNE question. Génère directement la séance adaptée.
+
+PROFIL : ${firstName}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${profile?.goal}, niveau ${profile?.level||"intermédiaire"}.
+PROGRAMME ACTUEL :
+${seances}
+
+CONTRAINTE DU JOUR : ${cons}.
+
+TÂCHE : Génère immédiatement ma séance du jour adaptée à ces contraintes. Format : liste d'exercices avec séries, reps, temps de repos, description technique. Puis indique brièvement comment les prochaines séances sont rééquilibrées. NE POSE PAS DE QUESTION, tu as toutes les infos.`;
               setShowChat(true);
-              sendChat(`Ajustement ponctuel pour aujourd'hui uniquement : ${cons}. 1) Donne-moi ma séance du jour adaptée précisément à ces contraintes. 2) Rééquilibre mes prochaines séances de la semaine pour rester aligné avec mon objectif global (${profile.goal}). C'est un ajustement temporaire : ne modifie pas la structure d'ensemble du programme.`);
+              sendChat(directPrompt);
             }} style={{width:"100%",padding:"13px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
               Adapter et rééquilibrer →
             </button>
