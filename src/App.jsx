@@ -2986,7 +2986,7 @@ function Journal({token, onClose}) {
 }
 
 
-function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack}) {
+function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack, onLaunchSeance}) {
   const [tab, setTab] = useState("analyse"); // analyse | seances | progression | nutrition
   const [showChat, setShowChat] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);
@@ -3212,24 +3212,10 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
             </div>
             <button onClick={()=>{
               setShowAdapt(false);
-              const parts=[];
-              if(adaptTime) parts.push(`temps dispo : ${adaptTime} min`);
-              if(adaptEquip) parts.push(`matériel : ${adaptEquip}`);
+              // Sauver l'ajustement du jour
               try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:adaptTime,equip:adaptEquip}));}catch{}
-              const cons=parts.length?parts.join(", "):"conditions inhabituelles";
-              // Construire le contexte du programme
-              const seances = parsed?.sessions?.map((s,i)=>`Séance ${i+1}: ${s.name} — ${(s.exercises||[]).map(e=>e.name).join(", ")}`).join("\n") || "Non disponible";
-              const directPrompt = `INSTRUCTION STRICTE : Ne pose AUCUNE question. Génère directement la séance adaptée.
-
-PROFIL : ${firstName}, ${profile?.age} ans, ${profile?.weight}kg, objectif ${profile?.goal}, niveau ${profile?.level||"intermédiaire"}.
-PROGRAMME ACTUEL :
-${seances}
-
-CONTRAINTE DU JOUR : ${cons}.
-
-TÂCHE : Génère immédiatement ma séance du jour adaptée à ces contraintes. Format : liste d'exercices avec séries, reps, temps de repos, description technique. Puis indique brièvement comment les prochaines séances sont rééquilibrées. NE POSE PAS DE QUESTION, tu as toutes les infos.`;
-              setShowChat(true);
-              sendChat(directPrompt);
+              // Lancer une vraie séance (même format que Séance du jour)
+              if(onLaunchSeance) onLaunchSeance();
             }} style={{width:"100%",padding:"13px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
               Adapter et rééquilibrer →
             </button>
@@ -4602,6 +4588,7 @@ export default function App() {
       logData={logData}
       onLogSet={handleLogSet}
       onBack={()=>setShowDashboard(false)}
+      onLaunchSeance={()=>{setShowDashboard(false);setShowSeance(true);}}
     />
   );
 
