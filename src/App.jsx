@@ -3917,7 +3917,21 @@ function MuscleScreen({ profile, onClose }) {
   const [gender, setGender] = useState(profile?.gender === "femme" ? "female" : "male");
   const [sessions, setSessions] = useState([]);
   useEffect(() => {
-    try { setSessions(JSON.parse(localStorage.getItem("coach_sessions") || "[]")); } catch {}
+    try {
+      let s = JSON.parse(localStorage.getItem("coach_sessions") || "[]");
+      // Rétro-remplissage : les anciennes séances muscu sans "muscles" restaient
+      // invisibles (fallback sport vide). On les déduit de leurs exercices.
+      let changed = false;
+      s = s.map(e => {
+        if (e && e.type !== "weight" && (!Array.isArray(e.muscles) || e.muscles.length === 0)) {
+          const inf = inferMuscleGroups(e.exercises || []);
+          if (inf.length) { changed = true; return { ...e, muscles: inf }; }
+        }
+        return e;
+      });
+      if (changed) { try { localStorage.setItem("coach_sessions", JSON.stringify(s)); } catch {} }
+      setSessions(s);
+    } catch {}
   }, []);
   const data = computeRecentMuscles(sessions, days);
   const nb = sessions.filter(s => s && s.type !== "weight" && (!s.date || Date.now() - new Date(s.date).getTime() < days*864e5)).length;
