@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react"; // v2.1
+import { useState, useRef, useEffect, useCallback, Component } from "react"; // v2.1
 import { MuscleMap, computeSessionMuscles, computeRecentMuscles } from "./muscleData";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
@@ -37,6 +37,109 @@ const store = {
   set:(k,v)=>{ try{localStorage.setItem(k,JSON.stringify(v))}catch{} },
   del:(k)=>{ try{localStorage.removeItem(k)}catch{} },
 };
+
+// ─── SÉANCE HELPERS (normalisation robuste anti-crash) ────────────────────────
+// Convertit un temps ("... - 45sec", "1 min", "30") en secondes. Défini au niveau
+// module pour être dispo partout (SeancePanel l'appelait sans définition -> crash).
+function parseExSecs(s) {
+  if (!s) return 45;
+  const str = String(s);
+  const m = str.match(/(\d+)\s*(min|sec|s|seconde)/i);
+  if (m) return m[2].toLowerCase().startsWith("m") ? parseInt(m[1])*60 : parseInt(m[1]);
+  const n = parseInt(str.match(/(\d+)/)?.[1]);
+  return (n && n > 0 && n < 600) ? n : 45;
+}
+// Force un exercice d'échauffement/retour au calme en CHAÎNE (l'IA renvoie parfois
+// des objets -> ".split()" ou rendu direct plantaient l'appli).
+function exToStr(el) {
+  if (el == null) return "";
+  if (typeof el === "string") return el.trim();
+  if (typeof el === "number") return String(el);
+  if (typeof el === "object") {
+    const n = el.nom || el.name || el.exercice || el.titre || el.label || "";
+    const d = el.duree || el.temps || el.duration || el.time || el.secondes || "";
+    return String(d ? `${n} - ${d}` : n).trim();
+  }
+  return String(el).trim();
+}
+function normExList(arr) {
+  return Array.isArray(arr) ? arr.map(exToStr).filter(s => s.length > 0) : [];
+}
+function defaultWarmup(mins) {
+  return { duree: mins || 5, exercices: ["Mobilité articulaire - 60sec", "Cardio léger, montées de genoux - 60sec", "Activation, rotations bras et hanches - 60sec"] };
+}
+function defaultCooldown(mins) {
+  return { duree: mins || 5, exercices: ["Étirement quadriceps - 30sec", "Étirement ischio-jambiers - 30sec", "Étirement dos et épaules - 30sec", "Respiration profonde - 60sec"] };
+}
+// Coerce toute une séance au format du runner (main + warmup/cooldown en chaînes).
+function normalizeSeance(parsed, wm, cm) {
+  const p = parsed || {};
+  p.main = Array.isArray(p.main) ? p.main.map(ex => ({
+    name: ex.name || ex.nom || "Exercice",
+    sets: String(ex.sets || "3"),
+    reps: String(ex.reps || "10"),
+    rest: String(ex.rest || "60s").replace(" sec", "s").replace(" secondes", "s"),
+    desc: ex.desc || ex.description || ""
+  })) : [];
+  if (!p.warmup || typeof p.warmup !== "object") p.warmup = defaultWarmup(wm);
+  if (!p.cooldown || typeof p.cooldown !== "object") p.cooldown = defaultCooldown(cm);
+  p.warmup.exercices = normExList(p.warmup.exercices);
+  p.cooldown.exercices = normExList(p.cooldown.exercices);
+  if (p.warmup.exercices.length === 0) p.warmup.exercices = defaultWarmup(wm).exercices;
+  if (p.cooldown.exercices.length === 0) p.cooldown.exercices = defaultCooldown(cm).exercices;
+  if (!p.warmup.duree) p.warmup.duree = wm || 5;
+  if (!p.cooldown.duree) p.cooldown.duree = cm || 5;
+  return p;
+}
+// Construit une séance-du-jour (format runner) à partir d'une séance du PROGRAMME.
+// C'est le pont : les exos prévus du programme deviennent le "main" du runner.
+function buildSeanceFromProgramSession(session, opts) {
+  const o = opts || {};
+  const wm = o.warmupMins || 5, cm = o.cooldownMins || 5;
+  let main = (session.exs || []).map(ex => ({
+    name: ex.name || "Exercice",
+    sets: String(ex.sets || "3"),
+    reps: String(ex.reps || "10"),
+    rest: String(ex.rest || "60s").replace(" sec", "s").replace(" secondes", "s"),
+    desc: ex.desc || ""
+  }));
+  // Adaptation au temps dispo (~8 min/exercice muscu) : on garde les prioritaires.
+  if (o.time) {
+    const mainMins = Math.max(8, o.time - wm - cm);
+    const maxEx = Math.max(3, Math.floor(mainMins / 8));
+    if (main.length > maxEx) main = main.slice(0, maxEx);
+  }
+  return normalizeSeance({
+    titre: session.name || "Séance du programme",
+    warmup: defaultWarmup(wm),
+    main,
+    cooldown: defaultCooldown(cm),
+    conseil: o.equip ? `Adaptée à ton matériel du jour : ${o.equip}.` : "Suis la technique et respecte les temps de repos."
+  }, wm, cm);
+}
+
+// ─── ERROR BOUNDARY (évite l'écran blanc irrécupérable) ───────────────────────
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false }; }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err) { try { console.error("Coach IA crash:", err); } catch {} }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center",fontFamily:"system-ui,sans-serif"}}>
+          <div style={{fontSize:44,marginBottom:14}}>😵‍💫</div>
+          <div style={{fontSize:16,fontWeight:800,color:C.t1,marginBottom:8}}>{this.props.title || "Un souci est survenu"}</div>
+          <div style={{fontSize:13,color:C.t3,marginBottom:22,maxWidth:340,lineHeight:1.5}}>Pas de panique, rien n'est perdu. Reviens en arrière pour continuer.</div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>{ this.setState({hasError:false}); this.props.onExit && this.props.onExit(); }} style={{padding:"12px 22px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}}>← Retour</button>
+            <button onClick={()=>{ try{ location.reload(); }catch{} }} style={{padding:"12px 22px",background:C.surfHigh,border:`1px solid ${C.bord}`,borderRadius:12,color:C.t2,fontWeight:700,fontSize:14,cursor:"pointer"}}>Recharger</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
 async function apiFetch(path, opts={}, token=null) {
@@ -742,7 +845,7 @@ function ExCard({ex,idx,accent,logData,onLogSet}) {
   );
 }
 
-function SessionBlock({session,accent,logData,onLogSet}) {
+function SessionBlock({session,accent,logData,onLogSet,onLaunch}) {
   const cols={bleu:C.blue,vert:C.green,violet:"#a78bfa",orange:C.orange};
   const color=cols[session.color]||accent;
   const [open,setOpen]=useState(true);
@@ -761,6 +864,12 @@ function SessionBlock({session,accent,logData,onLogSet}) {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.t3} strokeWidth="2.5" style={{transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}><polyline points="6 9 12 15 18 9"/></svg>
         </div>
       </div>
+      {onLaunch&&(
+        <button onClick={(e)=>{e.stopPropagation();onLaunch(session);}}
+          style={{width:"100%",padding:"11px",background:color,border:"none",color:"#fff",fontWeight:800,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+          ▶ Faire cette séance maintenant
+        </button>
+      )}
       {open&&<div style={{padding:"10px"}}>
         {session.exs.map((ex,i)=>(
           <ExCard key={i} ex={ex} idx={i} accent={color}
@@ -872,6 +981,10 @@ function SeanceTimer({seconds, label, accent, onDone}) {
       if (left <= 5 && !spoken5.current) { spoken5.current = true; speak("5, 4, 3, 2, 1"); }
       if (left <= 0) {
         clearInterval(interval);
+        // Mitigation arrière-plan : la voix ne joue pas si l'appli est en fond,
+        // on tente vibration + notification (partiel sans PWA/service worker).
+        try { if (navigator.vibrate) navigator.vibrate([300,150,300]); } catch {}
+        try { if (window.Notification && Notification.permission === "granted") new Notification("Repos terminé", { body: "C'est reparti !" }); } catch {}
         speak("C'est reparti !");
         onDone && onDone();
       }
@@ -1330,12 +1443,56 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
       const w = JSON.parse(localStorage.getItem("exercise_weights") || "{}");
       setSavedWeights(w);
     } catch {}
-    // Check for in-progress session
+
+    // ── PONT PROGRAMME → SÉANCE DU JOUR (priorité absolue) ──
+    // Si une séance du programme a été demandée, on la charge telle quelle dans le
+    // runner (échauffement → séance → retour au calme), avec ses vrais exercices.
+    try {
+      const psRaw = localStorage.getItem("coach_program_session");
+      if (psRaw) {
+        localStorage.removeItem("coach_program_session");
+        const ps = JSON.parse(psRaw);
+        if (ps && Array.isArray(ps.exs) && ps.exs.length) {
+          let adj = null;
+          try {
+            const a = JSON.parse(localStorage.getItem("coach_today_adjust") || "null");
+            const today = new Date().toISOString().split("T")[0];
+            if (a && a.date === today && (a.time || a.equip)) adj = a;
+          } catch {}
+          const dur = adj?.time || 45;
+          const wm = dur <= 20 ? 3 : dur <= 35 ? 5 : dur <= 50 ? 7 : 10;
+          const cm = dur <= 20 ? 2 : dur <= 35 ? 4 : 5;
+          const sd = buildSeanceFromProgramSession(ps, { warmupMins: wm, cooldownMins: cm, time: adj?.time, equip: adj?.equip });
+          setSport("musculation");
+          setObjectif(ps.name || "Séance du programme");
+          if (adj?.equip) setEquip([adj.equip]);
+          if (adj?.time) setDuree(adj.time);
+          setSeanceData(sd);
+          setPhase("warmup");
+          setWarmupExIdx(0);
+          setScreen("seance");
+          try { if (window.Notification && Notification.permission === "default") Notification.requestPermission().catch(()=>{}); } catch {}
+          try {
+            localStorage.setItem("coach_session_inprogress", JSON.stringify({
+              savedAt: new Date().toISOString(),
+              sport: "musculation", seanceType: "", duree: dur, objectif: ps.name || "Programme",
+              equip: adj?.equip ? [adj.equip] : (profile?.equip ? [profile.equip] : ["Poids du corps"]),
+              seanceData: sd, phase: "warmup", sessionLog: []
+            }));
+          } catch {}
+          return; // on ignore la reprise : on démarre la séance du programme
+        }
+      }
+    } catch {}
+
+    // Sinon : reprise d'une séance en cours
     try {
       const inProgress = localStorage.getItem("coach_session_inprogress");
       if (inProgress) {
         const session = JSON.parse(inProgress);
         if (session && session.seanceData && session.sport) {
+          // Normalise les données restaurées (anciennes séances = objets possibles)
+          session.seanceData = normalizeSeance(session.seanceData, session.seanceData?.warmup?.duree, session.seanceData?.cooldown?.duree);
           setResumeData(session);
           setScreen("resume");
         }
@@ -1674,21 +1831,8 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
       if (!parsed.main || !Array.isArray(parsed.main) || parsed.main.length === 0) {
         throw new Error("Structure invalide: pas d exercices dans main");
       }
-      // Normalize: convert number sets/reps to strings, fix rest format
-      parsed.main = parsed.main.map(ex => ({
-        ...ex,
-        name: ex.name || ex.nom || "Exercice",
-        sets: String(ex.sets || "3"),
-        reps: String(ex.reps || "10"),
-        rest: String(ex.rest || "60s").replace(" sec","s").replace(" secondes","s"),
-        desc: ex.desc || ex.description || ""
-      }));
-      // Add defaults if missing
-      if (!parsed.warmup) parsed.warmup = {duree: warmupMins2, exercices: ["Échauffement général - 60sec", "Mobilité articulaire - 60sec", "Montée de genoux - 45sec"]};
-      if (!parsed.cooldown) parsed.cooldown = {duree: cooldownMins2, exercices: ["Étirement quadriceps - 30sec", "Étirement ischio-jambiers - 30sec", "Respiration profonde - 60sec"]};
-      // Normalize warmup/cooldown exercices
-      if (parsed.warmup && !Array.isArray(parsed.warmup.exercices)) parsed.warmup.exercices = [];
-      if (parsed.cooldown && !Array.isArray(parsed.cooldown.exercices)) parsed.cooldown.exercices = [];
+      // Normalisation robuste : main + warmup/cooldown forcés en chaînes (anti-crash).
+      parsed = normalizeSeance(parsed, warmupMins2, cooldownMins2);
       setSeanceData(parsed);
       setScreen("seance");
       setPhase("warmup");
@@ -1752,7 +1896,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
             setDuree(resumeData.duree);
             setObjectif(resumeData.objectif);
             setEquip(resumeData.equip || ["Poids du corps"]);
-            setSeanceData(resumeData.seanceData);
+            setSeanceData(normalizeSeance(resumeData.seanceData, resumeData.seanceData?.warmup?.duree, resumeData.seanceData?.cooldown?.duree));
             setSessionLog(resumeData.sessionLog || []);
             setPhase(resumeData.phase || "main");
             setScreen("seance");
@@ -2996,6 +3140,7 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
   const [showAdapt, setShowAdapt] = useState(false);
   const [adaptTime, setAdaptTime] = useState(null);
   const [adaptEquip, setAdaptEquip] = useState(null);
+  const [adaptSession, setAdaptSession] = useState(null);
   const adaptOpts = [
     {id:null,icon:"🔄",label:"Mon équipement habituel"},
     {id:"Salle complète",icon:"🏋️",label:"Salle complète"},
@@ -3124,7 +3269,8 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
         {tab==="seances"&&(
           <div>
             {parsed?.sessions?.length>0 ? parsed.sessions.map((s,i)=>(
-              <SessionBlock key={i} session={s} accent={cols[s.color]||"#3b6ff0"} logData={logData} onLogSet={onLogSet}/>
+              <SessionBlock key={i} session={s} accent={cols[s.color]||"#3b6ff0"} logData={logData} onLogSet={onLogSet}
+                onLaunch={(sess)=>{ try{localStorage.setItem("coach_program_session",JSON.stringify(sess));}catch{}; onLaunchSeance&&onLaunchSeance(); }}/>
             )) : (
               <div style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>
                 <div style={{fontSize:40,marginBottom:12}}>📋</div>
@@ -3194,7 +3340,17 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:300,display:"flex",alignItems:"flex-end"}} onClick={()=>setShowAdapt(false)}>
           <div style={{width:"100%",maxWidth:680,margin:"0 auto",background:C.surfHigh,borderRadius:"17px 17px 0 0",padding:"20px 15px 28px",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{fontSize:15,fontWeight:800,color:C.t1,marginBottom:3}}>Adapter la séance du jour</div>
-            <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.45}}>Moins de temps ou pas le bon matériel ? Le coach adapte la séance du jour et rééquilibre les suivantes.</div>
+            <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.45}}>Choisis la séance prévue, ajuste temps/matériel : elle se lance en mode guidé (échauffement → séance → retour au calme).</div>
+            {parsed?.sessions?.length>0 && (
+              <>
+                <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>📋 Séance prévue aujourd'hui</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
+                  {parsed.sessions.map((s,i)=>(
+                    <button key={i} onClick={()=>setAdaptSession(i)} style={{flex:"1 0 45%",padding:"9px",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:700,background:adaptSession===i?C.violet+"22":C.bg,border:`1.5px solid ${adaptSession===i?C.violet:C.bord}`,color:adaptSession===i?"#c4b5fd":C.t2}}>{s.name}</button>
+                  ))}
+                </div>
+              </>
+            )}
             <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>⏱ Temps dispo</div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
               {[[null,"Comme prévu"],[20,"20 min"],[30,"30 min"],[45,"45 min"],[60,"1 h"]].map(([v,l])=>(
@@ -3214,7 +3370,10 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
               setShowAdapt(false);
               // Sauver l'ajustement du jour
               try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:adaptTime,equip:adaptEquip}));}catch{}
-              // Lancer une vraie séance (même format que Séance du jour)
+              // Porter la séance PRÉVUE du programme dans le runner (choisie, ou la 1re par défaut)
+              const chosen = (adaptSession!=null && parsed?.sessions?.[adaptSession]) ? parsed.sessions[adaptSession] : (parsed?.sessions?.[0] || null);
+              if(chosen){ try{localStorage.setItem("coach_program_session",JSON.stringify(chosen));}catch{} }
+              // Lancer la séance (même format que Séance du jour)
               if(onLaunchSeance) onLaunchSeance();
             }} style={{width:"100%",padding:"13px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
               Adapter et rééquilibrer →
@@ -4580,16 +4739,18 @@ export default function App() {
 
   // Show dashboard if requested
   if(showDashboard&&dashboardParsed&&profile) return (
-    <ProgramDashboard
-      parsed={dashboardParsed}
-      profile={profile}
-      firstName={firstName}
-      token={token}
-      logData={logData}
-      onLogSet={handleLogSet}
-      onBack={()=>setShowDashboard(false)}
-      onLaunchSeance={()=>{setShowDashboard(false);setShowSeance(true);}}
-    />
+    <ErrorBoundary title="Le programme a rencontré un souci" onExit={()=>setShowDashboard(false)}>
+      <ProgramDashboard
+        parsed={dashboardParsed}
+        profile={profile}
+        firstName={firstName}
+        token={token}
+        logData={logData}
+        onLogSet={handleLogSet}
+        onBack={()=>setShowDashboard(false)}
+        onLaunchSeance={()=>{setShowDashboard(false);setShowSeance(true);}}
+      />
+    </ErrorBoundary>
   );
 
   if(loading||screen==="loading") return (
@@ -4615,7 +4776,7 @@ export default function App() {
   return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
       {showJournal&&<Journal token={token} onClose={()=>setShowJournal(false)}/>}
-      {showSeance&&<SeancePanel token={token} profile={profile} firstName={firstName} initialSport={initialSport} onClose={()=>setShowSeance(false)} sendToChat={send}/>}
+      {showSeance&&<ErrorBoundary title="La séance a rencontré un souci" onExit={()=>setShowSeance(false)}><SeancePanel token={token} profile={profile} firstName={firstName} initialSport={initialSport} onClose={()=>setShowSeance(false)} sendToChat={send}/></ErrorBoundary>}
       {showHIIT&&<HIITPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowHIIT(false)}/>}
       {showWeight&&<BodyWeightTracker onClose={()=>setShowWeight(false)}/>}
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
