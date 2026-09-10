@@ -118,6 +118,32 @@ function buildSeanceFromProgramSession(session, opts) {
   }, wm, cm);
 }
 
+// Déduit les groupes musculaires travaillés à partir des noms d'exercices.
+// Sert de filet quand une séance est lancée depuis le programme (aucun groupe
+// sélectionné à la main) : sans ça, la carte "Muscles travaillés" reste vide.
+function inferMuscleGroups(exercises) {
+  const MAP = [
+    [/développé couché|pompe|push[- ]?up|écarté|butterfly|pectora|\bpec\b/i, "Pectoraux"],
+    [/rowing|tirage|traction|pull[- ]?up|dorsau|\bdos\b|deadlift|soulevé de terre/i, "Dos"],
+    [/développé militaire|épaule|deltoïde|élévation latérale|arnold|oiseau|face pull|overhead/i, "Épaules"],
+    [/ischio|romanian|roumain|good morning/i, "Ischio-jambiers"],
+    [/curl|biceps/i, "Biceps"],
+    [/triceps|barre front|kickback|extension.*(triceps|nuque|bras)/i, "Triceps"],
+    [/squat|fente|lunge|presse|leg press|leg extension|quadriceps|pistol/i, "Quadriceps"],
+    [/hip thrust|fessier|glute|\bpont\b/i, "Fessiers"],
+    [/mollet|calf/i, "Mollets"],
+    [/crunch|gainage|planche|abdo|mountain climber|russian twist|relevé de jambe|oblique|sit[- ]?up/i, "Abdominaux"],
+    [/burpee|thruster|\bclean\b|snatch|corps entier|full body/i, "Corps entier"],
+  ];
+  const out = new Set();
+  (exercises || []).forEach(ex => {
+    const name = String(ex?.name || ex?.nom || ex || "").toLowerCase();
+    if (/leg curl/.test(name)) { out.add("Ischio-jambiers"); return; } // évite le faux "biceps"
+    MAP.forEach(([re, group]) => { if (re.test(name)) out.add(group); });
+  });
+  return [...out];
+}
+
 // ─── ERROR BOUNDARY (évite l'écran blanc irrécupérable) ───────────────────────
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false }; }
@@ -671,8 +697,16 @@ const VIDEOS = {
 };
 
 function getVideoId(name) {
-  return null; // Videos replaced by AI-generated technique descriptions
+  if (!name) return null;
+  const n = String(name).toLowerCase().trim();
+  if (VIDEOS[n]) return VIDEOS[n];
+  // Correspondance par mot-clé : le nom généré contient souvent l'exercice.
+  const keys = Object.keys(VIDEOS).sort((a,b)=>b.length-a.length);
+  for (const k of keys) { if (n.includes(k) || k.includes(n)) return VIDEOS[k]; }
+  return null;
 }
+// Un ID YouTube valide fait 11 caractères (lettres/chiffres/-/_).
+function isEmbeddableId(id) { return typeof id === "string" && /^[\w-]{11}$/.test(id); }
 
 
 function YoutubeEmbed({videoId, title}) {
@@ -715,9 +749,8 @@ function TechniqueTip({name, desc}) {
   if (!tip) return null;
 
   const [showVideo, setShowVideo] = useState(false);
-  const searchQuery = encodeURIComponent(name + " exercice technique");
-  const searchUrl = `https://www.youtube.com/results?search_query=${searchQuery}`;
-  const shortsUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(name + " exercice shorts")}`;
+  const vid = getVideoId(name);
+  const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(name + " exercice technique")}`;
 
   return (
     <div style={{background:"rgba(99,102,241,0.08)",border:"1px solid rgba(99,102,241,0.2)",borderRadius:10,padding:"10px 12px",marginBottom:10}}>
@@ -731,14 +764,29 @@ function TechniqueTip({name, desc}) {
         <div style={{marginTop:8}}>
           <p style={{fontSize:12,color:"#c7d2fe",lineHeight:1.65,margin:"0 0 8px"}}>{tip}</p>
           {muscles && <div style={{fontSize:10,color:"#818cf8",fontWeight:600,marginBottom:8}}>🎯 {muscles}</div>}
-          <div style={{display:"flex",gap:8}}>
-            <a href={searchUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",textDecoration:"none",cursor:"pointer"}}>
-              ▶ Voir la démo
+          {isEmbeddableId(vid) ? (
+            <>
+              <button onClick={()=>setShowVideo(v=>!v)} style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",cursor:"pointer"}}>
+                {showVideo ? "▲ Masquer la démo" : "▶ Voir la démo"}
+              </button>
+              {showVideo && (
+                <div style={{position:"relative",width:"100%",paddingBottom:"56.25%",height:0,marginTop:8,borderRadius:10,overflow:"hidden",background:"#000"}}>
+                  <iframe
+                    src={`https://www.youtube.com/embed/${vid}?rel=0&playsinline=1&modestbranding=1`}
+                    title={name}
+                    loading="lazy"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                    style={{position:"absolute",inset:0,width:"100%",height:"100%",border:0}}
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <a href={searchUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:6,background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#f87171",textDecoration:"none"}}>
+              ▶ Chercher la démo sur YouTube ↗
             </a>
-            <a href={shortsUrl} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,background:"rgba(255,255,255,0.05)",border:`1px solid ${C.bord}`,borderRadius:8,padding:"7px 10px",fontSize:10,fontWeight:600,color:C.t3,textDecoration:"none"}}>
-              Shorts ↗
-            </a>
-          </div>
+          )}
         </div>
       )}
     </div>
@@ -1335,7 +1383,7 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
   const [seanceType, setSeanceType] = useState("");
   const [duree, setDuree] = useState(30);
   const [objectif, setObjectif] = useState("");
-  const [equip, setEquip] = useState(profile?.equip ? [profile.equip] : ["Poids du corps"]);
+  const [equip, setEquip] = useState([]);
   const [todayAdj, setTodayAdj] = useState(null);
   const [resumeData, setResumeData] = useState(null);
   const [seanceData, setSeanceData] = useState(null);
@@ -1363,7 +1411,7 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
         headers:{"Content-Type":"application/json","Authorization":`Bearer ${token}`},
         body:JSON.stringify({
           system:"Tu es un coach sportif expert. Génère UN SEUL exercice au format JSON strict : {\"name\":string,\"sets\":number,\"reps\":string,\"rest\":string,\"desc\":string}. Description technique détaillée. Aucun texte hors du JSON.",
-          messages:[{role:"user",content:`Ajoute un exercice : ${addExInput}. Sport : ${sport}. Équipement : ${equip.join(", ")}. Adapte au niveau ${profile?.level||"intermédiaire"}.`}],
+          messages:[{role:"user",content:`Ajoute un exercice : ${addExInput}. Sport : ${sport}. Équipement : ${(equip.length?equip.join(", "):(profile?.equip||"Poids du corps"))}. Adapte au niveau ${profile?.level||"intermédiaire"}.`}],
           max_tokens:500
         })
       });
@@ -1400,7 +1448,7 @@ function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSpo
 
       const adaptPrompt = `ADAPTATION EN DIRECT de la séance de ${firstName}.
 Raison : ${reason}.${readinessNote}
-Sport : ${sport} | Durée totale : ${duree} min | Équipement : ${equip.join(", ")}
+Sport : ${sport} | Durée totale : ${duree} min | Équipement : ${(equip.length?equip.join(", "):(profile?.equip||"Poids du corps"))}
 Exercices actuels et progression :
 ${doneExs}
 
@@ -1418,10 +1466,21 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
       if (a >= 0 && b > a) t = t.slice(a, b+1);
       const newExs = JSON.parse(t);
       if (Array.isArray(newExs) && newExs.length > 0) {
-        setSeanceData(prev => ({...prev, main: newExs.map(ex => ({...ex, sets: ex.sets||3, reps: ex.reps||"10", rest: ex.rest||"60s", desc: ex.desc||""}))}));
+        setSeanceData(prev => ({...prev, main: newExs.map(ex => ({
+          name: ex.name || ex.nom || "Exercice",
+          sets: String(ex.sets || "3"),
+          reps: String(ex.reps || "10"),
+          rest: String(ex.rest || "60s").replace(" sec","s").replace(" secondes","s"),
+          desc: ex.desc || ex.description || ""
+        }))}));
         speak("Séance adaptée ! Les exercices ont été ajustés.");
+      } else {
+        throw new Error("Réponse vide");
       }
-    } catch (e) { console.error("Live adapt error:", e); }
+    } catch (e) {
+      console.error("Live adapt error:", e);
+      try { alert("Je n'ai pas réussi à adapter la séance. Réessaie dans un instant."); } catch {}
+    }
     setLiveAdapting(false);
   };
 
@@ -1465,6 +1524,7 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
           const sd = buildSeanceFromProgramSession(ps, { warmupMins: wm, cooldownMins: cm, time: adj?.time, equip: adj?.equip });
           setSport("musculation");
           setObjectif(ps.name || "Séance du programme");
+          setMuscles(inferMuscleGroups(ps.exs));
           if (adj?.equip) setEquip([adj.equip]);
           if (adj?.time) setDuree(adj.time);
           setSeanceData(sd);
@@ -1548,7 +1608,7 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
           type: "seance",
           sport: sport || "musculation",
           titre: seanceData?.titre || `Séance ${sport}`,
-          duree, objectif, muscles,
+          duree, objectif, muscles: (muscles && muscles.length ? muscles : inferMuscleGroups(seanceData?.main || [])),
           exercises: updated,
           status: "in_progress"
         };
@@ -1572,7 +1632,7 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
       titre: seanceData?.titre || `Séance ${sport}`,
       duree,
       objectif,
-      muscles,
+      muscles: (muscles && muscles.length ? muscles : inferMuscleGroups(seanceData?.main || [])),
       exercises: sessionLog
     };
     try {
@@ -2047,6 +2107,9 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                     <button onClick={()=>setEquip(eq=>eq.filter(x=>x!==e))} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:14,padding:0}}>×</button>
                   </div>
                 ))}
+                {equip.length===0 && profile?.equip && (
+                  <div style={{fontSize:11,color:"#6b7280",marginTop:8,lineHeight:1.4}}>Rien de sélectionné → ton matériel habituel sera utilisé : <span style={{color:"#9ca3af",fontWeight:600}}>{profile.equip}</span>.</div>
+                )}
               </div>
             );
           })()}
