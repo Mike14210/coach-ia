@@ -144,6 +144,32 @@ function inferMuscleGroups(exercises) {
   return [...out];
 }
 
+// Explication courte pour un mouvement d'échauffement ou un étirement (le runner
+// n'affichait que le nom + le chrono, sans consigne).
+const MOVE_TIPS = [
+  [/quadriceps|cuisse avant/i, "Debout, attrape ta cheville derrière toi (talon vers la fesse), genoux serrés, bassin légèrement rentré. Tiens sans à-coups, puis change de jambe."],
+  [/ischio|arrière.*cuisse/i, "Jambe tendue devant toi, penche le buste vers l'avant en gardant le dos plat. Tu dois sentir l'arrière de la cuisse, pas le bas du dos."],
+  [/mollet|calf/i, "Un pied loin derrière, talon collé au sol et jambe tendue, penche-toi vers l'avant (appui sur un mur). Change de côté."],
+  [/fessier|glute|pigeon/i, "Allongé, croise une cheville sur le genou opposé et ramène le tout vers la poitrine. Garde les épaules au sol."],
+  [/\bdos\b|dorsau|colonne|chat|cat.?cow/i, "À quatre pattes, arrondis le dos en soufflant puis creuse-le en inspirant. Mouvement lent, vertèbre par vertèbre."],
+  [/épaule|deltoïde|bras.*poitrine/i, "Croise un bras tendu devant la poitrine et ramène-le vers toi avec l'autre bras. 20-30 sec de chaque côté."],
+  [/pectora|poitrine|\bpec\b|ouverture/i, "Avant-bras contre un mur ou un cadre de porte, avance le buste et tourne légèrement à l'opposé pour ouvrir la poitrine."],
+  [/triceps/i, "Bras plié derrière la tête, main entre les omoplates ; pousse doucement le coude vers le bas avec l'autre main."],
+  [/\bcou\b|nuque|trapèze|cervical/i, "Incline lentement la tête sur le côté, oreille vers l'épaule, sans hausser l'épaule. Respire, puis change de côté."],
+  [/hanche|psoas|fléchisseur|fente basse/i, "En fente basse, genou arrière au sol, pousse le bassin vers l'avant. Tu sens l'avant de la hanche arrière s'étirer."],
+  [/adducteur|papillon|aine/i, "Assis, plantes de pieds jointes, laisse les genoux descendre vers le sol. Dos droit, penche-toi légèrement en avant si besoin."],
+  [/respiration|cohérence|souffle|savasana/i, "Inspire 4 sec par le nez, expire 6 sec par la bouche. Relâche les épaules et la mâchoire à chaque expiration."],
+  [/mobilité articulaire|articulaire/i, "Fais tourner lentement chevilles, genoux, hanches, épaules et poignets, dans un sens puis dans l'autre."],
+  [/montée.*genou|talon.*fesse|course sur place|cardio|jumping/i, "Sur place, rythme régulier et progressif (montées de genoux, talons-fesses) pour élever la température du corps."],
+  [/rotation|cercle.*bras|activation/i, "Grands cercles des bras puis rotations du bassin et du tronc, amplitude croissante, pour réveiller les articulations."],
+];
+function moveTip(str) {
+  const s = String(str || "").toLowerCase();
+  for (const [re, tip] of MOVE_TIPS) { if (re.test(s)) return tip; }
+  if (/étir|stretch/.test(s)) return "Va jusqu'à une tension confortable (jamais douloureuse), garde la position sans à-coups et respire lentement.";
+  return "Mouvement lent et contrôlé, amplitude progressive, respiration régulière — c'est de la préparation, pas de la performance.";
+}
+
 // ─── ERROR BOUNDARY (évite l'écran blanc irrécupérable) ───────────────────────
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false }; }
@@ -182,7 +208,7 @@ function durationGuidance(duration) {
   // Donne des règles de structure concrètes selon le temps disponible
   if (duration <= 20) return {
     label: "Express (≤20 min)",
-    rules: `- MAX 4 exercices par séance, uniquement des mouvements composés (squat, pompes, rowing, fentes)
+    rules: `- 3 à 4 exercices par séance (jamais moins de 3), uniquement des mouvements composés (squat, pompes, rowing, fentes)
 - 2-3 séries par exercice, pas de superset ni d'isolation
 - Repos courts : 30-45 sec entre les séries
 - Échauffement réduit à 3 minutes (mobilité essentielle uniquement)
@@ -190,7 +216,7 @@ function durationGuidance(duration) {
   };
   if (duration <= 35) return {
     label: "Courte (21-35 min)",
-    rules: `- 5 exercices maximum, priorité aux mouvements polyarticulaires
+    rules: `- 4 à 5 exercices par séance (jamais moins de 3), priorité aux mouvements polyarticulaires
 - 3 séries par exercice
 - Repos 45-60 sec
 - Échauffement 5 minutes
@@ -698,11 +724,15 @@ const VIDEOS = {
 
 function getVideoId(name) {
   if (!name) return null;
-  const n = String(name).toLowerCase().trim();
+  const n = String(name).toLowerCase().trim().replace(/[’]/g, "'");
   if (VIDEOS[n]) return VIDEOS[n];
-  // Correspondance par mot-clé : le nom généré contient souvent l'exercice.
-  const keys = Object.keys(VIDEOS).sort((a,b)=>b.length-a.length);
-  for (const k of keys) { if (n.includes(k) || k.includes(n)) return VIDEOS[k]; }
+  // Tolère uniquement le singulier/pluriel exact ("pompe" ↔ "pompes").
+  if (VIDEOS[n + "s"]) return VIDEOS[n + "s"];
+  if (n.endsWith("s") && VIDEOS[n.slice(0, -1)]) return VIDEOS[n.slice(0, -1)];
+  // Sinon : seulement les clés MULTI-MOTS (mouvements précis) présentes en entier.
+  // Un mot générique ("squat") ne doit PAS matcher une variante ("squat bulgare").
+  const multi = Object.keys(VIDEOS).filter(k => k.includes(" ")).sort((a,b)=>b.length-a.length);
+  for (const k of multi) { if (n.includes(k)) return VIDEOS[k]; }
   return null;
 }
 // Un ID YouTube valide fait 11 caractères (lettres/chiffres/-/_).
@@ -2223,6 +2253,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   <div style={{fontSize:13,color:C.orange,fontWeight:700,marginBottom:12}}>
                     {seanceData.warmup.exercices[warmupExIdx]?.match(/\d+\s*(sec|min)/i)?.[0] || "45 sec"}
                   </div>
+                  <p style={{fontSize:12,color:C.t3,lineHeight:1.55,margin:"0 0 12px"}}>{moveTip(seanceData.warmup.exercices[warmupExIdx])}</p>
                   {warmupTimer
                     ? <SeanceTimer
                         key={warmupExIdx}
@@ -2400,6 +2431,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   <div style={{fontSize:13,color:C.green,fontWeight:700,marginBottom:12}}>
                     {seanceData.cooldown.exercices[cooldownExIdx]?.match(/\d+\s*(sec|min)/i)?.[0] || "30 sec"}
                   </div>
+                  <p style={{fontSize:12,color:C.t3,lineHeight:1.55,margin:"0 0 12px"}}>{moveTip(seanceData.cooldown.exercices[cooldownExIdx])}</p>
                   {cooldownTimer
                     ? <SeanceTimer
                         key={"cool-"+cooldownExIdx}
