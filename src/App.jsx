@@ -1603,13 +1603,15 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
       }
     } catch {}
 
-    // Sinon : reprise d'une séance en cours
+    // Sinon : reprise d'une séance en cours. On ne la propose que si aucun sport
+    // n'a été choisi explicitement (Séance du jour générique), OU si la séance en
+    // cours correspond au sport demandé — pour ne pas écraser un choix d'accès rapide.
     try {
       const inProgress = localStorage.getItem("coach_session_inprogress");
       if (inProgress) {
         const session = JSON.parse(inProgress);
-        if (session && session.seanceData && session.sport) {
-          // Normalise les données restaurées (anciennes séances = objets possibles)
+        const sportMatches = !initialSport || session?.sport === initialSport;
+        if (session && session.seanceData && session.sport && sportMatches) {
           session.seanceData = normalizeSeance(session.seanceData, session.seanceData?.warmup?.duree, session.seanceData?.cooldown?.duree);
           setResumeData(session);
           setScreen("resume");
@@ -4967,7 +4969,7 @@ export default function App() {
         logData={logData}
         onLogSet={handleLogSet}
         onBack={()=>setShowDashboard(false)}
-        onLaunchSeance={()=>{setShowDashboard(false);setShowSeance(true);}}
+        onLaunchSeance={()=>{setInitialSport(null);setShowDashboard(false);setShowSeance(true);}}
       />
     </ErrorBoundary>
   );
@@ -5125,7 +5127,7 @@ export default function App() {
                 {label:"🔀 Variantes +/- difficiles",fn:()=>send("Pour chaque exercice, donne 2 variantes : une plus facile et une plus difficile.")},
                 {label:"📋 Journal",fn:()=>setShowJournal(true)},
               {label:"🥗 Nutrition",fn:()=>openNutrition()},
-              {label:"⚡ Séance du jour",fn:()=>setShowSeance(true)},
+              {label:"⚡ Séance du jour",fn:()=>{setInitialSport(null);setShowSeance(true);}},
               ].map(a=>(
                 <button key={a.label} onClick={a.fn} style={{flexShrink:0,background:a.hi?C.orange+"18":C.surf,border:`1px solid ${a.hi?C.orange:C.bord}`,borderRadius:16,padding:"6px 11px",color:a.hi?C.orange:C.t2,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{a.label}</button>
               ))}
