@@ -1681,7 +1681,7 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
           type: "seance",
           sport: sport || "musculation",
           titre: seanceData?.titre || `Séance ${sport}`,
-          duree, objectif, muscles: (muscles && muscles.length ? muscles : inferMuscleGroups(seanceData?.main || [])),
+          duree, objectif: (objectif || seanceType), muscles: (muscles && muscles.length ? muscles : inferMuscleGroups(seanceData?.main || [])),
           exercises: updated,
           status: "in_progress"
         };
@@ -1704,7 +1704,7 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
       sport: sport || "musculation",
       titre: seanceData?.titre || `Séance ${sport}`,
       duree,
-      objectif,
+      objectif: (objectif || seanceType),
       muscles: (muscles && muscles.length ? muscles : inferMuscleGroups(seanceData?.main || [])),
       exercises: sessionLog
     };
@@ -1858,7 +1858,7 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
 
   const toggleMuscle = (id) => setMuscles(prev => prev.includes(id) ? prev.filter(m=>m!==id) : [...prev, id]);
   const currentOpts = sport ? sportOptions[sport] : null;
-  const canGenerate = sport && duree && objectif && (sport!=="musculation" || muscles.length>0) && (sport==="musculation" || seanceType);
+  const canGenerate = sport && duree && (sport==="musculation" ? (muscles.length>0 && objectif) : seanceType);
   const isCardio = sport && ["running","velo","natation","marche"].includes(sport);
   const needsWeights = sport === "musculation";
 
@@ -1880,7 +1880,7 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
       ? `Équipement : ${equipStr}`
       : sport === "calistenie"
       ? `Callisthénie (poids du corps uniquement, pas de matériel de salle nécessaire). Niveau/focus : ${seanceType}. Proposer des variantes adaptées au niveau avec progressions (ex: si débutant → pompes genoux → pompes normales → pompes déclinées). Indiquer clairement les variantes pour chaque exercice selon le niveau.`
-      : `Sport : ${sport}. Pas besoin d'équipement de salle.`;
+      : `Sport : ${sport}.${equip.length?` Matériel disponible : ${equip.join(", ")} — utilise-le pour varier les blocs quand c'est pertinent.`:" Pas besoin de matériel particulier."}`;
 
     // ── Load history for variety & progressive overload ──
     let historyContext = "";
@@ -1922,7 +1922,7 @@ RÈGLES DE PROGRESSION :
     const wodSport = ["crossfit","hiit"].includes(sport);
     let mainGuide, mainExample;
     if (isCardio) {
-      mainGuide = `TYPE DE SÉANCE : ${sport} — "${seanceType}". Construis une VRAIE séance de ${sport} cohérente avec ce type. INTERDIT : exercices de renforcement au sol (squats, pompes, fentes, burpees...) sauf si le type l'impose explicitement. Le tableau "main" décrit les BLOCS de ${sport} : pour un fractionné, un bloc par type d'intervalle avec le nombre de répétitions ; pour de l'endurance/tempo/sortie, un ou deux blocs continus. Convention des champs : "sets" = nombre de répétitions du bloc, "reps" = durée/distance + allure visée, "rest" = récupération entre répétitions ("—" si continu), "desc" = consigne d'allure/effort. Échauffement et retour au calme adaptés à la course (footing progressif, gammes, étirements légers).`;
+      mainGuide = `TYPE DE SÉANCE : ${sport} — "${seanceType}". Construis une VRAIE séance de ${sport} cohérente avec ce type. INTERDIT : exercices de renforcement au sol (squats, pompes, fentes, burpees...) sauf si le type l'impose explicitement. Le tableau "main" décrit les BLOCS de ${sport} : pour un fractionné, un bloc par type d'intervalle avec le nombre de répétitions ; pour de l'endurance/tempo/sortie, un ou deux blocs continus. Convention des champs : "sets" = nombre de répétitions du bloc, "reps" = durée/distance + allure/effort visé, "rest" = récupération entre répétitions ("—" si continu), "desc" = consigne d'allure/effort. Échauffement et retour au calme ADAPTÉS AU ${sport} (mise en train progressive spécifique, mobilité, retour au calme et étirements légers).`;
       mainExample = `{"name": "Fractionné 30s/30s", "sets": "8", "reps": "30s allure rapide / 30s footing lent", "rest": "—", "desc": "Allure soutenue mais tenable sur les 8 répétitions"},
     {"name": "Retour au footing", "sets": "1", "reps": "5 min en continu", "rest": "—", "desc": "Récupération active, allure très souple"}`;
     } else if (sport === "yoga") {
@@ -1945,7 +1945,7 @@ RÈGLES DE PROGRESSION :
     const prompt = `Tu es un coach sportif expert. Génère une séance unique pour ${firstName}.
 DURÉE TOTALE STRICTE : ${duree} min = échauffement ${warmupMins2} min + séance ${mainMins2} min + retour au calme ${cooldownMins2} min. Ne pas dépasser ${duree} min.
 ${mainGuide}
-Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}${todayAdj?" | AJUSTEMENT DU JOUR (ponctuel) : respecter STRICTEMENT la durée et le matériel indiqués, c'est une contrainte du jour.":""}${readinessNote}
+Sport : ${sportLabel}${objectif?` | Objectif : ${objectif}`:""} | ${sportContext}${todayAdj?" | AJUSTEMENT DU JOUR (ponctuel) : respecter STRICTEMENT la durée et le matériel indiqués, c'est une contrainte du jour.":""}${readinessNote}
 ${profile ? `Niveau : ${profile.level} | Age : ${profile.age} ans` : ""}
 ${historyContext}
 
@@ -2143,7 +2143,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
           {/* Équipement - multi-select + custom */}
           {/* Équipement — affiché uniquement si pertinent */}
           {(()=>{
-            const noEquip = ["running","velo","natation","marche"];
+            const noEquip = ["running","velo","marche"];
             const caliEquip = ["calistenie"];
             const hiitEquip = ["hiit","crossfit"];
             if(noEquip.includes(sport)) return null;
@@ -2166,6 +2166,12 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
               {id:"Bloc yoga",icon:"🧱",sub:"Support postures"},
               {id:"Sangle yoga",icon:"🎗️",sub:"Étirements assistés"},
               {id:"Bolster",icon:"🛏️",sub:"Relaxation"},
+            ] : sport === "natation" ? [
+              {id:"Pull buoy",icon:"🔵",sub:"Isole le haut du corps"},
+              {id:"Plaquettes",icon:"🖐️",sub:"Renforce la traction"},
+              {id:"Planche",icon:"🟦",sub:"Travail des jambes"},
+              {id:"Palmes",icon:"🦶",sub:"Vitesse & gainage"},
+              {id:"Tuba frontal",icon:"🤿",sub:"Focus technique"},
             ] : [
               {id:"Poids du corps",icon:"🤸",sub:"Aucun matériel"},
               {id:"Haltères",icon:"🏋️",sub:"Paire ou plusieurs"},
@@ -2209,7 +2215,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
               </div>
             );
           })()}
-          <div style={{marginBottom:20}}>
+          {sport==="musculation" && (<div style={{marginBottom:20}}>
             <div style={{fontSize:13,fontWeight:700,color:"#f9fafb",marginBottom:4}}>🎯 Objectifs <span style={{fontSize:10,color:"#6b7280",fontWeight:400}}>(plusieurs possibles)</span></div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
               {[
@@ -2244,7 +2250,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
               <button onClick={()=>{const v=document.getElementById("custom-obj").value.trim();if(v){setObjectif(o=>o?o+", "+v:v);document.getElementById("custom-obj").value="";}}}
                 style={{background:"rgba(234,108,0,0.3)",border:"none",borderRadius:10,padding:"9px 14px",color:"#fdba74",fontWeight:700,fontSize:12,cursor:"pointer"}}>+ Ajouter</button>
             </div>
-          </div>
+          </div>)}
 
           <button onClick={generate} disabled={!canGenerate}
             style={{width:"100%",padding:"14px",background:canGenerate?"#16a34a":"rgba(255,255,255,0.08)",border:"none",borderRadius:12,color:"#fff",fontWeight:700,fontSize:15,cursor:canGenerate?"pointer":"not-allowed",marginBottom:20}}>
