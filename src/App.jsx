@@ -2704,8 +2704,80 @@ function parseRecipes(text) {
 }
 
 // ─── NUTRITION PANEL ──────────────────────────────────────────────────────────
-function NutritionPanel({token, profile, firstName, onClose, sendToChat, programCals}) {
-  const [mode, setMode] = useState("recettes"); // recettes | frigo | courses | semaine | mesrecettes
+// ─── CARTE HYDRATATION (réutilisable : onglet Journal + accueil) ──────────────
+function HydrationCard({ profile, onOpen, compact }) {
+  const todayKey = new Date().toISOString().split("T")[0];
+  const [waterMl, setWaterMl] = useState(0);
+  const [waterStreak, setWaterStreak] = useState(0);
+  const [workoutToday, setWorkoutToday] = useState(false);
+  const clipId = useRef("btl" + Math.random().toString(36).slice(2, 8)).current;
+  const waterGoal = waterBaseGoal(profile?.weight) + (workoutToday ? 500 : 0);
+  useEffect(() => {
+    try {
+      const wm = JSON.parse(localStorage.getItem("coach_water") || "{}");
+      setWaterMl(wm[todayKey] || 0);
+      const wo = workoutDaysSet();
+      setWorkoutToday(wo.has(todayKey));
+      setWaterStreak(computeWaterStreak(wm, waterBaseGoal(profile?.weight), wo));
+    } catch {}
+  }, []);
+  // Litres sans arrondi trompeur : 750 → "0,75", 500 → "0,5", 1000 → "1".
+  const fmtL = (ml) => (ml/1000).toFixed(2).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
+  const updateWater = (nextRaw) => {
+    const before = waterMl;
+    const val = Math.max(0, Math.round(nextRaw));
+    setWaterMl(val);
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_water") || "{}");
+      all[todayKey] = val;
+      const keys = Object.keys(all).sort().reverse().slice(0, 60);
+      const trimmed = {}; keys.forEach(k => { trimmed[k] = all[k]; });
+      localStorage.setItem("coach_water", JSON.stringify(trimmed));
+      setWaterStreak(computeWaterStreak(trimmed, waterBaseGoal(profile?.weight), workoutDaysSet()));
+    } catch {}
+    if (before < waterGoal && val >= waterGoal) { try { navigator.vibrate && navigator.vibrate([120,60,120]); } catch {} }
+  };
+  const pct = Math.max(0, Math.min(waterMl / waterGoal, 1));
+  return (
+    <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:compact?14:16,marginBottom:compact?0:16}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <button onClick={onOpen||undefined} disabled={!onOpen} style={{background:"none",border:"none",padding:0,cursor:onOpen?"pointer":"default",display:"flex",alignItems:"center",gap:6}}>
+          <span style={{fontSize:14,fontWeight:800,color:C.t1}}>💧 Hydratation</span>
+          {onOpen && <span style={{fontSize:10,color:C.t4,fontWeight:700}}>ouvrir →</span>}
+        </button>
+        {waterStreak>0 && <div style={{fontSize:11,fontWeight:800,color:"#38bdf8",background:"rgba(56,189,248,0.12)",border:"1px solid rgba(56,189,248,0.3)",borderRadius:20,padding:"3px 10px"}}>🔥 {waterStreak} j</div>}
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:14}}>
+        <svg width="52" height="106" viewBox="0 0 58 118" style={{flexShrink:0}}>
+          <defs><clipPath id={clipId}><rect x="12" y="20" width="34" height="92" rx="12"/></clipPath></defs>
+          <rect x="22" y="4" width="14" height="10" rx="2" fill="none" stroke={C.bordM} strokeWidth="2"/>
+          <rect x="12" y="20" width="34" height="92" rx="12" fill="rgba(255,255,255,0.04)" stroke={C.bordM} strokeWidth="2"/>
+          <g clipPath={`url(#${clipId})`}>
+            <rect x="12" y={112-90*pct} width="34" height={90*pct} fill="#38bdf8" opacity="0.85"/>
+            {90*pct>4 && <rect x="12" y={112-90*pct-2} width="34" height="5" fill="#7dd3fc"/>}
+          </g>
+        </svg>
+        <div style={{flex:1}}>
+          <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+            <span style={{fontSize:26,fontWeight:900,color:"#38bdf8"}}>{fmtL(waterMl)}</span>
+            <span style={{fontSize:13,color:C.t3,fontWeight:700}}>/ {fmtL(waterGoal)} L</span>
+          </div>
+          <div style={{fontSize:11,color:C.t4,marginTop:2}}>{Math.round(Math.min(waterMl/waterGoal*100,999))}% de ton objectif{workoutToday?" · +50 cl séance du jour":""}</div>
+          {waterMl>=waterGoal && <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:4}}>✅ Objectif atteint, bravo !</div>}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 44px",gap:8}}>
+        {[["+25 cl",250],["+50 cl",500],["+1 L",1000]].map(([lbl,ml])=>(
+          <button key={lbl} onClick={()=>updateWater(waterMl+ml)} style={{padding:"11px 4px",background:"rgba(56,189,248,0.12)",border:"1px solid rgba(56,189,248,0.3)",borderRadius:10,color:"#7dd3fc",fontWeight:800,fontSize:13,cursor:"pointer"}}>{lbl}</button>
+        ))}
+        <button onClick={()=>updateWater(waterMl-250)} title="Retirer 25 cl" style={{padding:"11px 4px",background:"rgba(255,255,255,0.05)",border:`1px solid ${C.bord}`,borderRadius:10,color:C.t3,fontWeight:800,fontSize:18,cursor:"pointer"}}>−</button>
+      </div>
+    </div>
+  );
+}
+
+function NutritionPanel({token, profile, firstName, onClose, sendToChat, programCals, initialMode}) {
+  const [mode, setMode] = useState(initialMode || "recettes"); // recettes | frigo | courses | semaine | mesrecettes | journal
   const [ingredients, setIngredients] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);   // texte (modes frigo/courses/semaine)
@@ -2775,35 +2847,6 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
 
   const removeFromJournal = (id) => {
     saveJournal(journalEntries.filter(e => e.id !== id));
-  };
-
-  // ── Hydratation (v1) ──
-  const [waterMl, setWaterMl] = useState(0);
-  const [waterStreak, setWaterStreak] = useState(0);
-  const [workoutToday, setWorkoutToday] = useState(false);
-  const waterGoal = waterBaseGoal(profile?.weight) + (workoutToday ? 500 : 0);
-  useEffect(() => {
-    try {
-      const wm = JSON.parse(localStorage.getItem("coach_water") || "{}");
-      setWaterMl(wm[todayKey] || 0);
-      const wo = workoutDaysSet();
-      setWorkoutToday(wo.has(todayKey));
-      setWaterStreak(computeWaterStreak(wm, waterBaseGoal(profile?.weight), wo));
-    } catch {}
-  }, []);
-  const updateWater = (nextRaw) => {
-    const before = waterMl;
-    const val = Math.max(0, Math.round(nextRaw));
-    setWaterMl(val);
-    try {
-      const all = JSON.parse(localStorage.getItem("coach_water") || "{}");
-      all[todayKey] = val;
-      const keys = Object.keys(all).sort().reverse().slice(0, 60); // ~2 mois d'historique
-      const trimmed = {}; keys.forEach(k => { trimmed[k] = all[k]; });
-      localStorage.setItem("coach_water", JSON.stringify(trimmed));
-      setWaterStreak(computeWaterStreak(trimmed, waterBaseGoal(profile?.weight), workoutDaysSet()));
-    } catch {}
-    if (before < waterGoal && val >= waterGoal) { try { navigator.vibrate && navigator.vibrate([120,60,120]); } catch {} }
   };
 
   const journalTotals = journalEntries.reduce((acc, e) => ({
@@ -3105,39 +3148,7 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
             </div>
 
             {/* Hydratation */}
-            <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:16,marginBottom:16}}>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-                <div style={{fontSize:14,fontWeight:800,color:C.t1}}>💧 Hydratation</div>
-                {waterStreak>0 && <div style={{fontSize:11,fontWeight:800,color:"#38bdf8",background:"rgba(56,189,248,0.12)",border:"1px solid rgba(56,189,248,0.3)",borderRadius:20,padding:"3px 10px"}}>🔥 {waterStreak} j</div>}
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:14}}>
-                {(()=>{ const pct=Math.max(0,Math.min(waterMl/waterGoal,1)); const fillH=90*pct; return (
-                  <svg width="58" height="118" viewBox="0 0 58 118" style={{flexShrink:0}}>
-                    <defs><clipPath id="btlclip"><rect x="12" y="20" width="34" height="92" rx="12"/></clipPath></defs>
-                    <rect x="22" y="4" width="14" height="10" rx="2" fill="none" stroke={C.bordM} strokeWidth="2"/>
-                    <rect x="12" y="20" width="34" height="92" rx="12" fill="rgba(255,255,255,0.04)" stroke={C.bordM} strokeWidth="2"/>
-                    <g clipPath="url(#btlclip)">
-                      <rect x="12" y={112-fillH} width="34" height={fillH} fill="#38bdf8" opacity="0.85"/>
-                      {fillH>4 && <rect x="12" y={112-fillH-2} width="34" height="5" fill="#7dd3fc"/>}
-                    </g>
-                  </svg>
-                ); })()}
-                <div style={{flex:1}}>
-                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                    <span style={{fontSize:26,fontWeight:900,color:"#38bdf8"}}>{(waterMl/1000).toFixed(1)}</span>
-                    <span style={{fontSize:13,color:C.t3,fontWeight:700}}>/ {(waterGoal/1000).toFixed(1)} L</span>
-                  </div>
-                  <div style={{fontSize:11,color:C.t4,marginTop:2}}>{Math.round(Math.min(waterMl/waterGoal*100,999))}% de ton objectif{workoutToday?" · +50 cl séance du jour":""}</div>
-                  {waterMl>=waterGoal && <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:4}}>✅ Objectif atteint, bravo !</div>}
-                </div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 44px",gap:8}}>
-                {[["+25 cl",250],["+50 cl",500],["+1 L",1000]].map(([lbl,ml])=>(
-                  <button key={lbl} onClick={()=>updateWater(waterMl+ml)} style={{padding:"11px 4px",background:"rgba(56,189,248,0.12)",border:"1px solid rgba(56,189,248,0.3)",borderRadius:10,color:"#7dd3fc",fontWeight:800,fontSize:13,cursor:"pointer"}}>{lbl}</button>
-                ))}
-                <button onClick={()=>updateWater(waterMl-250)} title="Retirer 25 cl" style={{padding:"11px 4px",background:"rgba(255,255,255,0.05)",border:`1px solid ${C.bord}`,borderRadius:10,color:C.t3,fontWeight:800,fontSize:18,cursor:"pointer"}}>−</button>
-              </div>
-            </div>
+            <HydrationCard profile={profile} />
 
             {/* Entrées du jour */}
             {journalEntries.length > 0 ? (
@@ -4582,7 +4593,7 @@ function ReadinessPanel({ profile, onClose, onDone }) {
   );
 }
 
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan, onStreaks, streakCount, onPhotos}) {
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onWater, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan, onStreaks, streakCount, onPhotos}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -4663,6 +4674,11 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
             <div style={{fontSize:10,color:"rgba(255,255,255,0.6)",marginBottom:10,lineHeight:1.4}}>Sur mesure · Maintenant</div>
             <div style={{fontSize:10,color:"rgba(255,255,255,0.85)",fontWeight:700,background:"rgba(255,255,255,0.15)",display:"inline-block",borderRadius:8,padding:"3px 9px"}}>Choisir →</div>
           </button>
+        </div>
+
+        {/* Hydratation (raccourci accueil) */}
+        <div style={{marginBottom:12}}>
+          <HydrationCard profile={profile} onOpen={onWater} compact/>
         </div>
 
         {/* Préparation full-width */}
@@ -4771,6 +4787,8 @@ export default function App() {
   const [equipOverride,setEquipOverride]=useState(null);
   const [showJournal,setShowJournal]=useState(false);
   const [showNutrition,setShowNutrition]=useState(false);
+  const [nutritionMode,setNutritionMode]=useState("recettes");
+  const openNutrition=(m)=>{setNutritionMode(m||"recettes");setShowNutrition(true);};
   const [homeScreen,setHomeScreen]=useState(true); // true=home, false=chat
   const [showDashboard,setShowDashboard]=useState(false);
   const [dashboardParsed,setDashboardParsed]=useState(null);
@@ -4986,7 +5004,7 @@ export default function App() {
       {showBilan&&<BilanPanel profile={profile} firstName={firstName} token={token} onClose={()=>setShowBilan(false)} programCals={dashboardParsed?.cals}/>}
       {showStreaks&&<StreaksPanel onClose={()=>setShowStreaks(false)}/>}
       {showPhotos&&<ProgressPhotos profile={profile} token={token} onClose={()=>setShowPhotos(false)}/>}
-      {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send} programCals={dashboardParsed?.cals}/>}
+      {showNutrition&&<NutritionPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowNutrition(false)} sendToChat={send} programCals={dashboardParsed?.cals} initialMode={nutritionMode}/>}
 
       {/* Main content - no old header */}
       <div style={{flex:1,overflowY:"auto",background:C.bg}}>
@@ -5025,7 +5043,8 @@ export default function App() {
               onSeance={(sport)=>{setInitialSport(sport||null);setShowSeance(true);}}
               onPrep={()=>setShowPrep(true)}
               onHIIT={()=>setShowHIIT(true)}
-              onNutrition={()=>setShowNutrition(true)}
+              onNutrition={()=>openNutrition()}
+              onWater={()=>openNutrition("journal")}
               onProfil={()=>setScreen("form")}
               onWeight={()=>setShowWeight(true)}
               onMuscles={()=>setShowMuscles(true)}
@@ -5105,7 +5124,7 @@ export default function App() {
                 {label:`📈 Évoluer sem. ${week+1}`,fn:()=>{setWeek(w=>w+1);send(`Semaine ${week+1}. Fais évoluer progressivement : charges, volume, variantes.`);}},
                 {label:"🔀 Variantes +/- difficiles",fn:()=>send("Pour chaque exercice, donne 2 variantes : une plus facile et une plus difficile.")},
                 {label:"📋 Journal",fn:()=>setShowJournal(true)},
-              {label:"🥗 Nutrition",fn:()=>setShowNutrition(true)},
+              {label:"🥗 Nutrition",fn:()=>openNutrition()},
               {label:"⚡ Séance du jour",fn:()=>setShowSeance(true)},
               ].map(a=>(
                 <button key={a.label} onClick={a.fn} style={{flexShrink:0,background:a.hi?C.orange+"18":C.surf,border:`1px solid ${a.hi?C.orange:C.bord}`,borderRadius:16,padding:"6px 11px",color:a.hi?C.orange:C.t2,fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>{a.label}</button>
