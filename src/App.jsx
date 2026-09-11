@@ -198,6 +198,19 @@ function computeWaterStreak(waterMap, base, woDays) {
   return streak;
 }
 
+// Série de jours consécutifs avec au moins une séance (streak d'entraînement).
+function sessionStreakCount() {
+  try {
+    const sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]");
+    const days = new Set(sessions.filter(s => s && s.type !== "weight" && s.date).map(s => new Date(s.date).toISOString().split("T")[0]));
+    let s = 0; const d = new Date();
+    let check = d.toISOString().split("T")[0];
+    if (!days.has(check)) { d.setDate(d.getDate() - 1); check = d.toISOString().split("T")[0]; }
+    if (days.has(check)) { const cd = new Date(check); while (days.has(cd.toISOString().split("T")[0])) { s++; cd.setDate(cd.getDate() - 1); } }
+    return s;
+  } catch { return 0; }
+}
+
 // ─── ERROR BOUNDARY (évite l'écran blanc irrécupérable) ───────────────────────
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false }; }
@@ -1905,9 +1918,33 @@ RÈGLES DE PROGRESSION :
         readinessNote = ` | SCORE DE FORME : ${r.total}% (sommeil ${r.sleep}/5, courbatures ${r.soreness}/5, énergie ${r.energy}/5, stress ${r.stress}/5) → intensité recommandée : ${r.intensity}. ADAPTE la séance à ce niveau de forme.`;
       }
     } catch {}
+    // Guide de structure adapté au sport (cardio, yoga, pilates, WOD, muscu…).
+    const wodSport = ["crossfit","hiit"].includes(sport);
+    let mainGuide, mainExample;
+    if (isCardio) {
+      mainGuide = `TYPE DE SÉANCE : ${sport} — "${seanceType}". Construis une VRAIE séance de ${sport} cohérente avec ce type. INTERDIT : exercices de renforcement au sol (squats, pompes, fentes, burpees...) sauf si le type l'impose explicitement. Le tableau "main" décrit les BLOCS de ${sport} : pour un fractionné, un bloc par type d'intervalle avec le nombre de répétitions ; pour de l'endurance/tempo/sortie, un ou deux blocs continus. Convention des champs : "sets" = nombre de répétitions du bloc, "reps" = durée/distance + allure visée, "rest" = récupération entre répétitions ("—" si continu), "desc" = consigne d'allure/effort. Échauffement et retour au calme adaptés à la course (footing progressif, gammes, étirements légers).`;
+      mainExample = `{"name": "Fractionné 30s/30s", "sets": "8", "reps": "30s allure rapide / 30s footing lent", "rest": "—", "desc": "Allure soutenue mais tenable sur les 8 répétitions"},
+    {"name": "Retour au footing", "sets": "1", "reps": "5 min en continu", "rest": "—", "desc": "Récupération active, allure très souple"}`;
+    } else if (sport === "yoga") {
+      mainGuide = `TYPE : yoga — "${seanceType}". Construis un ENCHAÎNEMENT de postures (asanas) cohérent avec ce style. Le tableau "main" liste les postures/séquences dans l'ordre. INTERDIT : exercices de musculation avec charges. Convention : "sets" = nombre de cycles ou de côtés, "reps" = durée de maintien ou nombre de respirations (ex "5 respirations", "45s par côté"), "rest" = "—" ou transition douce, "desc" = alignement + respiration. Échauffement = éveil articulaire / salutations douces ; retour au calme = postures au sol + relaxation (savasana).`;
+      mainExample = `{"name": "Salutation au soleil (Surya Namaskar A)", "sets": "5", "reps": "5 cycles au rythme du souffle", "rest": "—", "desc": "Synchronise chaque mouvement avec l'inspiration et l'expiration"},
+    {"name": "Guerrier II (Virabhadrasana II)", "sets": "2", "reps": "45s par côté", "rest": "—", "desc": "Genou avant à 90 degrés, épaules relâchées, regard au-dessus de la main avant"}`;
+    } else if (sport === "pilates") {
+      mainGuide = `TYPE : pilates — "${seanceType}". Construis une séance d'exercices Pilates au sol (mat), centrés sur le gainage profond et le contrôle du mouvement. INTERDIT : charges lourdes / matériel de salle. Convention : "sets" = séries, "reps" = répétitions lentes ou durée de maintien (ex "10 réps contrôlées", "30s"), "rest" = repos court, "desc" = respiration + engagement du centre. Échauffement = mobilisation de la colonne + respiration ; retour au calme = étirements doux.`;
+      mainExample = `{"name": "The Hundred", "sets": "1", "reps": "100 pompages (10 respirations)", "rest": "—", "desc": "Centre engagé, jambes en tabletop ou tendues selon le niveau"},
+    {"name": "Roll Up", "sets": "2", "reps": "8 réps contrôlées", "rest": "30s", "desc": "Déroule la colonne vertèbre par vertèbre, sans à-coups"}`;
+    } else if (wodSport) {
+      mainGuide = `TYPE : ${sport} — "${seanceType}". Construis un WOD structuré (AMRAP, EMOM, rounds for time ou Tabata selon le type). Le tableau "main" liste les mouvements du WOD dans l'ordre. Convention : "sets" = nombre de tours ou format (ex "5 rounds", "AMRAP", "EMOM"), "reps" = répétitions ou durée par mouvement, "rest" = repos entre tours, "desc" = format global + scaling/charge. Indique clairement le format (ex "AMRAP 12 min", "5 rounds for time") dans le titre et le premier "desc". Échauffement = montée cardiaque progressive + mobilité ; retour au calme = récupération + étirements.`;
+      mainExample = `{"name": "Burpees", "sets": "5 rounds", "reps": "12 réps", "rest": "—", "desc": "Format : 5 rounds for time avec le mouvement suivant. Scale en step-back burpees si besoin"},
+    {"name": "Air squats", "sets": "5 rounds", "reps": "20 réps", "rest": "repos libre entre rounds", "desc": "Reste explosif et régulier"}`;
+    } else {
+      mainGuide = `Pour ${mainMins2} min de séance principale : ${Math.max(3,Math.floor(mainMins2/8))} exercices (≈8 min/exercice : 3 séries + repos + installation). Respecter STRICTEMENT ce nombre.`;
+      mainExample = `{"name": "Nom exercice", "sets": "3", "reps": "10-12", "rest": "75s", "desc": "Technique courte"},
+    {"name": "Nom exercice", "sets": "3", "reps": "10-12", "rest": "60s", "desc": "Technique courte"}`;
+    }
     const prompt = `Tu es un coach sportif expert. Génère une séance unique pour ${firstName}.
-DURÉE TOTALE STRICTE : ${duree} min = échauffement ${warmupMins2} min + séance ${mainMins2} min + retour au calme ${cooldownMins2} min.
-Ne pas dépasser ${duree} min. Pour ${mainMins2} min de séance principale : musculation ${Math.max(3,Math.floor(mainMins2/8))} exercices (8min/exercice : 3 séries + repos + installation). Respecter strictement ce nombre.par exercice avec repos). Ne pas depasser cette limite.
+DURÉE TOTALE STRICTE : ${duree} min = échauffement ${warmupMins2} min + séance ${mainMins2} min + retour au calme ${cooldownMins2} min. Ne pas dépasser ${duree} min.
+${mainGuide}
 Sport : ${sportLabel} | Objectif : ${objectif} | ${sportContext}${todayAdj?" | AJUSTEMENT DU JOUR (ponctuel) : respecter STRICTEMENT la durée et le matériel indiqués, c'est une contrainte du jour.":""}${readinessNote}
 ${profile ? `Niveau : ${profile.level} | Age : ${profile.age} ans` : ""}
 ${historyContext}
@@ -1920,8 +1957,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
     "exercices": ["exercice 1 - Xsec", "exercice 2 - Xsec", "exercice 3 - Xsec"]
   },
   "main": [
-    {"name": "Nom exercice", "sets": "3", "reps": "10-12", "rest": "75s", "desc": "Technique courte"},
-    {"name": "Nom exercice", "sets": "3", "reps": "10-12", "rest": "60s", "desc": "Technique courte"}
+    ${mainExample}
   ],
   "cooldown": {
     "duree": ${cooldownMins2},
@@ -4595,7 +4631,129 @@ function ReadinessPanel({ profile, onClose, onDone }) {
   );
 }
 
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onWater, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan, onStreaks, streakCount, onPhotos}) {
+// ─── SÉANCE LIBRE (log manuel d'une activité déjà faite) ──────────────────────
+function FreeSessionPanel({ profile, onClose, onSaved }) {
+  const SPORTS = [
+    {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
+    {id:"natation",icon:"🏊",label:"Natation"},{id:"marche",icon:"🚶",label:"Marche / Rando"},
+    {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
+    {id:"hiit",icon:"🔥",label:"HIIT"},{id:"crossfit",icon:"🏋️",label:"CrossFit"},
+    {id:"yoga",icon:"🧘",label:"Yoga"},{id:"pilates",icon:"🌀",label:"Pilates"},
+    {id:"autre",icon:"✨",label:"Autre"},
+  ];
+  const [sport, setSport] = useState("");
+  const [duree, setDuree] = useState(45);
+  const todayIso = new Date().toISOString().split("T")[0];
+  const [dayIso, setDayIso] = useState(todayIso);
+  const [note, setNote] = useState("");
+  const [done, setDone] = useState(false);
+
+  const week = [];
+  for (let i = 6; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); week.push(d); }
+  const yestIso = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split("T")[0]; })();
+  const dayLabel = (d) => {
+    const iso = d.toISOString().split("T")[0];
+    if (iso === todayIso) return "Auj.";
+    if (iso === yestIso) return "Hier";
+    return d.toLocaleDateString("fr-FR", { weekday: "short" }).replace(".", "") + " " + d.getDate();
+  };
+
+  const save = () => {
+    if (!sport) return;
+    const label = SPORTS.find(s => s.id === sport)?.label || "Séance";
+    const [y, m, dd] = dayIso.split("-").map(Number);
+    const dateObj = new Date(y, m - 1, dd, 12, 0); // midi local : évite le décalage de jour en UTC
+    const entry = {
+      date: dateObj.toISOString(), type: "seance", sport,
+      titre: `${label} (libre)`, duree: Number(duree) || 0,
+      objectif: "Séance libre", muscles: [], exercises: [], status: "completed", free: true,
+      ...(note.trim() ? { note: note.trim() } : {})
+    };
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_sessions") || "[]");
+      all.unshift(entry);
+      localStorage.setItem("coach_sessions", JSON.stringify(all.slice(0, 100)));
+    } catch {}
+    onSaved && onSaved();
+    setDone(true);
+    setTimeout(() => onClose && onClose(), 1000);
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,-apple-system,sans-serif"}}>
+      <div style={{background:C.surfHigh,borderBottom:`1px solid ${C.bord}`,padding:"14px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:800,color:C.t1}}>➕ Séance libre</div>
+          <div style={{fontSize:11,color:C.t4}}>Enregistre une activité déjà faite</div>
+        </div>
+        <button onClick={onClose} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:9,width:32,height:32,color:C.t2,fontSize:16,cursor:"pointer"}}>✕</button>
+      </div>
+
+      {done ? (
+        <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10}}>
+          <div style={{fontSize:46}}>✅</div>
+          <div style={{fontSize:15,fontWeight:800,color:C.t1}}>Séance enregistrée !</div>
+          <div style={{fontSize:12,color:C.t3}}>Elle compte dans ton suivi de la semaine.</div>
+        </div>
+      ) : (
+        <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"18px 16px 110px"}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:10}}>Quel sport ?</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:22}}>
+            {SPORTS.map(s => (
+              <button key={s.id} onClick={()=>setSport(s.id)}
+                style={{background:sport===s.id?C.greenL:C.surf,border:`1.5px solid ${sport===s.id?C.green:C.bord}`,borderRadius:12,padding:"12px 6px",cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:22,marginBottom:4}}>{s.icon}</div>
+                <div style={{fontSize:10,fontWeight:700,color:sport===s.id?"#86efac":C.t3}}>{s.label}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:10}}>Quel jour ?</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:6,marginBottom:22}}>
+            {week.map((d,i) => {
+              const iso = d.toISOString().split("T")[0];
+              const sel = iso === dayIso;
+              return (
+                <button key={i} onClick={()=>setDayIso(iso)}
+                  style={{background:sel?C.blueL:C.surf,border:`1.5px solid ${sel?C.blue:C.bord}`,borderRadius:9,padding:"9px 2px",cursor:"pointer",textAlign:"center"}}>
+                  <div style={{fontSize:10,fontWeight:700,color:sel?"#93c5fd":C.t3,lineHeight:1.2}}>{dayLabel(d)}</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:10}}>Durée</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
+            {[20,30,45,60,75,90].map(m => (
+              <button key={m} onClick={()=>setDuree(m)}
+                style={{flex:"1 0 28%",padding:"10px 4px",background:duree===m?C.violetL:C.surf,border:`1.5px solid ${duree===m?C.violet:C.bord}`,borderRadius:10,cursor:"pointer",fontSize:13,fontWeight:800,color:duree===m?"#c4b5fd":C.t3}}>{m} min</button>
+            ))}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22,justifyContent:"center"}}>
+            <button onClick={()=>setDuree(d=>Math.max(5,d-5))} style={{width:38,height:38,borderRadius:10,background:C.surf,border:`1px solid ${C.bord}`,color:C.t2,fontSize:18,fontWeight:800,cursor:"pointer"}}>−</button>
+            <div style={{fontSize:22,fontWeight:900,color:C.t1,minWidth:80,textAlign:"center"}}>{duree} min</div>
+            <button onClick={()=>setDuree(d=>Math.min(360,d+5))} style={{width:38,height:38,borderRadius:10,background:C.surf,border:`1px solid ${C.bord}`,color:C.t2,fontSize:18,fontWeight:800,cursor:"pointer"}}>+</button>
+          </div>
+
+          <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:10}}>Note (optionnel)</div>
+          <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Ex: footing tranquille, 6 km, sensations OK..."
+            style={{width:"100%",boxSizing:"border-box",minHeight:64,background:C.surf,border:`1px solid ${C.bord}`,borderRadius:10,padding:"10px 12px",color:C.t1,fontSize:13,fontFamily:"inherit",resize:"vertical"}}/>
+        </div>
+      )}
+
+      {!done && (
+        <div style={{position:"fixed",bottom:0,left:0,right:0,padding:"14px 16px 22px",background:`linear-gradient(to top, ${C.bg} 70%, transparent)`}}>
+          <button onClick={save} disabled={!sport}
+            style={{width:"100%",padding:"15px",background:sport?C.green:C.surf,border:"none",borderRadius:13,color:sport?"#fff":C.t4,fontWeight:800,fontSize:15,cursor:sport?"pointer":"not-allowed"}}>
+            Enregistrer la séance
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onWater, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan, onStreaks, streakCount, onPhotos, onFreeSession}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -4703,6 +4861,16 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
           <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"5px 10px",fontSize:11,color:"#fff",fontWeight:700,flexShrink:0}}>GO →</div>
         </button>
 
+        {/* Séance libre */}
+        <button onClick={onFreeSession} style={{width:"100%",background:C.surf,border:`1px dashed ${C.bordL}`,borderRadius:14,padding:"14px 18px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14,marginBottom:24}}>
+          <div style={{fontSize:26}}>➕</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:800,color:C.t1,marginBottom:2}}>J'ai fait une séance</div>
+            <div style={{fontSize:11,color:C.t3}}>Enregistre une activité déjà faite (footing, sortie vélo...) dans ton suivi</div>
+          </div>
+          <div style={{fontSize:11,color:C.t4,fontWeight:700,flexShrink:0}}>Ajouter →</div>
+        </button>
+
         {/* Streaks & Photos */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
           <button onClick={onStreaks} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:"14px 12px",cursor:"pointer",textAlign:"center"}}>
@@ -4795,6 +4963,7 @@ export default function App() {
   const [showDashboard,setShowDashboard]=useState(false);
   const [dashboardParsed,setDashboardParsed]=useState(null);
   const [showSeance,setShowSeance]=useState(false);
+  const [showFreeSession,setShowFreeSession]=useState(false);
   const [initialSport,setInitialSport]=useState(null);
   const [showPrep,setShowPrep]=useState(false);
   const [showWeight,setShowWeight]=useState(false);
@@ -4807,21 +4976,7 @@ export default function App() {
   const [streakCount,setStreakCount]=useState(0);
 
   // Calculer le streak au démarrage
-  useEffect(() => {
-    try {
-      const sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]");
-      const days = new Set(sessions.filter(s=>s&&s.type!=="weight"&&s.date).map(s=>new Date(s.date).toISOString().split("T")[0]));
-      let s = 0;
-      const d = new Date();
-      let check = d.toISOString().split("T")[0];
-      if (!days.has(check)) { d.setDate(d.getDate()-1); check = d.toISOString().split("T")[0]; }
-      if (days.has(check)) {
-        const cd = new Date(check);
-        while (days.has(cd.toISOString().split("T")[0])) { s++; cd.setDate(cd.getDate()-1); }
-      }
-      setStreakCount(s);
-    } catch {}
-  }, []);
+  useEffect(() => { setStreakCount(sessionStreakCount()); }, []);
   const [todayReadiness,setTodayReadiness]=useState(null);
 
   // Charger le score du jour au démarrage
@@ -4998,6 +5153,7 @@ export default function App() {
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
       {showJournal&&<Journal token={token} onClose={()=>setShowJournal(false)}/>}
       {showSeance&&<ErrorBoundary title="La séance a rencontré un souci" onExit={()=>setShowSeance(false)}><SeancePanel token={token} profile={profile} firstName={firstName} initialSport={initialSport} onClose={()=>setShowSeance(false)} sendToChat={send}/></ErrorBoundary>}
+      {showFreeSession&&<FreeSessionPanel profile={profile} onClose={()=>setShowFreeSession(false)} onSaved={()=>setStreakCount(sessionStreakCount())}/>}
       {showHIIT&&<HIITPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowHIIT(false)}/>}
       {showWeight&&<BodyWeightTracker onClose={()=>setShowWeight(false)}/>}
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
@@ -5047,6 +5203,7 @@ export default function App() {
               onHIIT={()=>setShowHIIT(true)}
               onNutrition={()=>openNutrition()}
               onWater={()=>openNutrition("journal")}
+              onFreeSession={()=>setShowFreeSession(true)}
               onProfil={()=>setScreen("form")}
               onWeight={()=>setShowWeight(true)}
               onMuscles={()=>setShowMuscles(true)}
