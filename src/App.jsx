@@ -170,6 +170,34 @@ function moveTip(str) {
   return "Mouvement lent et contrôlé, amplitude progressive, respiration régulière — c'est de la préparation, pas de la performance.";
 }
 
+// ─── HYDRATATION ─────────────────────────────────────────────────────────────
+// Objectif de base ~35 ml/kg/jour (repère clinique EFSA/ACSM), arrondi à 100 ml.
+function waterBaseGoal(weight) { return Math.round((35 * (Number(weight) || 70)) / 100) * 100; }
+// Jours où une séance a été faite (pour le bonus d'objectif +50 cl).
+function workoutDaysSet() {
+  const set = new Set();
+  try {
+    JSON.parse(localStorage.getItem("coach_sessions") || "[]").forEach(s => {
+      if (s && s.type !== "weight" && s.date) set.add(new Date(s.date).toISOString().split("T")[0]);
+    });
+  } catch {}
+  return set;
+}
+// Série de jours consécutifs où l'objectif d'eau (base +50 cl si séance) est atteint.
+function computeWaterStreak(waterMap, base, woDays) {
+  const goalFor = (key) => base + (woDays.has(key) ? 500 : 0);
+  const d = new Date();
+  const todayKey = d.toISOString().split("T")[0];
+  if ((waterMap[todayKey] || 0) < goalFor(todayKey)) d.setDate(d.getDate() - 1); // jour en cours non pénalisant
+  let streak = 0;
+  for (let i = 0; i < 400; i++) {
+    const key = d.toISOString().split("T")[0];
+    if ((waterMap[key] || 0) >= goalFor(key)) { streak++; d.setDate(d.getDate() - 1); }
+    else break;
+  }
+  return streak;
+}
+
 // ─── ERROR BOUNDARY (évite l'écran blanc irrécupérable) ───────────────────────
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false }; }
@@ -2749,6 +2777,35 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
     saveJournal(journalEntries.filter(e => e.id !== id));
   };
 
+  // ── Hydratation (v1) ──
+  const [waterMl, setWaterMl] = useState(0);
+  const [waterStreak, setWaterStreak] = useState(0);
+  const [workoutToday, setWorkoutToday] = useState(false);
+  const waterGoal = waterBaseGoal(profile?.weight) + (workoutToday ? 500 : 0);
+  useEffect(() => {
+    try {
+      const wm = JSON.parse(localStorage.getItem("coach_water") || "{}");
+      setWaterMl(wm[todayKey] || 0);
+      const wo = workoutDaysSet();
+      setWorkoutToday(wo.has(todayKey));
+      setWaterStreak(computeWaterStreak(wm, waterBaseGoal(profile?.weight), wo));
+    } catch {}
+  }, []);
+  const updateWater = (nextRaw) => {
+    const before = waterMl;
+    const val = Math.max(0, Math.round(nextRaw));
+    setWaterMl(val);
+    try {
+      const all = JSON.parse(localStorage.getItem("coach_water") || "{}");
+      all[todayKey] = val;
+      const keys = Object.keys(all).sort().reverse().slice(0, 60); // ~2 mois d'historique
+      const trimmed = {}; keys.forEach(k => { trimmed[k] = all[k]; });
+      localStorage.setItem("coach_water", JSON.stringify(trimmed));
+      setWaterStreak(computeWaterStreak(trimmed, waterBaseGoal(profile?.weight), workoutDaysSet()));
+    } catch {}
+    if (before < waterGoal && val >= waterGoal) { try { navigator.vibrate && navigator.vibrate([120,60,120]); } catch {} }
+  };
+
   const journalTotals = journalEntries.reduce((acc, e) => ({
     kcal: acc.kcal + (e.total?.kcal || 0),
     prot: acc.prot + (e.total?.prot || 0),
@@ -3044,6 +3101,41 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
                     <div style={{fontSize:10,color:C.t4}}>{l}</div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Hydratation */}
+            <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:16,marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.t1}}>💧 Hydratation</div>
+                {waterStreak>0 && <div style={{fontSize:11,fontWeight:800,color:"#38bdf8",background:"rgba(56,189,248,0.12)",border:"1px solid rgba(56,189,248,0.3)",borderRadius:20,padding:"3px 10px"}}>🔥 {waterStreak} j</div>}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:14}}>
+                {(()=>{ const pct=Math.max(0,Math.min(waterMl/waterGoal,1)); const fillH=90*pct; return (
+                  <svg width="58" height="118" viewBox="0 0 58 118" style={{flexShrink:0}}>
+                    <defs><clipPath id="btlclip"><rect x="12" y="20" width="34" height="92" rx="12"/></clipPath></defs>
+                    <rect x="22" y="4" width="14" height="10" rx="2" fill="none" stroke={C.bordM} strokeWidth="2"/>
+                    <rect x="12" y="20" width="34" height="92" rx="12" fill="rgba(255,255,255,0.04)" stroke={C.bordM} strokeWidth="2"/>
+                    <g clipPath="url(#btlclip)">
+                      <rect x="12" y={112-fillH} width="34" height={fillH} fill="#38bdf8" opacity="0.85"/>
+                      {fillH>4 && <rect x="12" y={112-fillH-2} width="34" height="5" fill="#7dd3fc"/>}
+                    </g>
+                  </svg>
+                ); })()}
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                    <span style={{fontSize:26,fontWeight:900,color:"#38bdf8"}}>{(waterMl/1000).toFixed(1)}</span>
+                    <span style={{fontSize:13,color:C.t3,fontWeight:700}}>/ {(waterGoal/1000).toFixed(1)} L</span>
+                  </div>
+                  <div style={{fontSize:11,color:C.t4,marginTop:2}}>{Math.round(Math.min(waterMl/waterGoal*100,999))}% de ton objectif{workoutToday?" · +50 cl séance du jour":""}</div>
+                  {waterMl>=waterGoal && <div style={{fontSize:11,color:C.green,fontWeight:700,marginTop:4}}>✅ Objectif atteint, bravo !</div>}
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 44px",gap:8}}>
+                {[["+25 cl",250],["+50 cl",500],["+1 L",1000]].map(([lbl,ml])=>(
+                  <button key={lbl} onClick={()=>updateWater(waterMl+ml)} style={{padding:"11px 4px",background:"rgba(56,189,248,0.12)",border:"1px solid rgba(56,189,248,0.3)",borderRadius:10,color:"#7dd3fc",fontWeight:800,fontSize:13,cursor:"pointer"}}>{lbl}</button>
+                ))}
+                <button onClick={()=>updateWater(waterMl-250)} title="Retirer 25 cl" style={{padding:"11px 4px",background:"rgba(255,255,255,0.05)",border:`1px solid ${C.bord}`,borderRadius:10,color:C.t3,fontWeight:800,fontSize:18,cursor:"pointer"}}>−</button>
               </div>
             </div>
 
