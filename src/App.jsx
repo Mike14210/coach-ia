@@ -2748,6 +2748,20 @@ function parseRecipes(text) {
 }
 
 // ─── NUTRITION PANEL ──────────────────────────────────────────────────────────
+// ─── REPAS (journal nutrition) ────────────────────────────────────────────────
+const MEALS = [
+  { id:"petitdej",  icon:"🌅", label:"Petit-déj" },
+  { id:"dejeuner",  icon:"☀️", label:"Déjeuner" },
+  { id:"collation", icon:"🍎", label:"Collation" },
+  { id:"diner",     icon:"🌙", label:"Dîner" },
+];
+function guessMeal(hour) { return hour < 11 ? "petitdej" : hour < 15 ? "dejeuner" : hour < 18 ? "collation" : "diner"; }
+function mealOfEntry(e) {
+  if (e && e.repas) return e.repas;
+  const h = parseInt(String(e?.time || "").split(":")[0], 10);
+  return guessMeal(isNaN(h) ? 12 : h);
+}
+
 // ─── CARTE HYDRATATION (réutilisable : onglet Journal + accueil) ──────────────
 function HydrationCard({ profile, onOpen, compact }) {
   const todayKey = new Date().toISOString().split("T")[0];
@@ -2858,6 +2872,7 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
   const [compteurResult, setCompteurResult] = useState(null);
   const photoRef = useRef(null);
   const [journalEntries, setJournalEntries] = useState([]);
+  const [journalMeal, setJournalMeal] = useState(null);
   const todayKey = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
@@ -2879,14 +2894,20 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
     } catch {}
   };
 
-  const addToJournal = (aliments, total) => {
+  const addToJournal = (aliments, total, repas) => {
+    const now = new Date();
     const entry = {
       id: Date.now(),
-      time: new Date().toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }),
+      time: now.toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }),
+      repas: repas || guessMeal(now.getHours()),
       aliments: aliments || [],
       total: total || { kcal:0, prot:0, gluc:0, lip:0 },
     };
     saveJournal([...journalEntries, entry]);
+  };
+
+  const setEntryMeal = (id, repas) => {
+    saveJournal(journalEntries.map(e => e.id === id ? { ...e, repas } : e));
   };
 
   const removeFromJournal = (id) => {
@@ -3144,7 +3165,18 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
                     ))}
                   </div>
                 )}
-                <button onClick={()=>{addToJournal(compteurResult.aliments, compteurResult.total);setCompteurResult(null);setIngredients("");}} style={{width:"100%",marginTop:12,padding:"11px",background:"rgba(59,111,240,0.15)",border:`1px solid ${C.blue}55`,borderRadius:10,color:"#93b4ff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                <div style={{marginTop:12,fontSize:11,fontWeight:700,color:C.t3,marginBottom:6}}>Ranger dans quel repas ?</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:10}}>
+                  {MEALS.map(m=>{
+                    const sel=(journalMeal||guessMeal(new Date().getHours()))===m.id;
+                    return (
+                      <button key={m.id} onClick={()=>setJournalMeal(m.id)} style={{padding:"8px 2px",borderRadius:9,cursor:"pointer",background:sel?"rgba(59,111,240,0.18)":C.bg,border:`1.5px solid ${sel?C.blue:C.bord}`,color:sel?"#93b4ff":C.t3,fontSize:10,fontWeight:700}}>
+                        <div style={{fontSize:16}}>{m.icon}</div>{m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <button onClick={()=>{addToJournal(compteurResult.aliments, compteurResult.total, journalMeal||guessMeal(new Date().getHours()));setCompteurResult(null);setIngredients("");setJournalMeal(null);}} style={{width:"100%",padding:"11px",background:"rgba(59,111,240,0.15)",border:`1px solid ${C.blue}55`,borderRadius:10,color:"#93b4ff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
                   📋 Ajouter au journal du jour
                 </button>
               </div>
@@ -3194,29 +3226,44 @@ function NutritionPanel({token, profile, firstName, onClose, sendToChat, program
             {/* Hydratation */}
             <HydrationCard profile={profile} />
 
-            {/* Entrées du jour */}
+            {/* Repas du jour, groupés par repas */}
             {journalEntries.length > 0 ? (
               <div>
-                <div style={{fontSize:11,fontWeight:800,color:C.t3,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Repas du jour</div>
-                {journalEntries.map((entry) => (
-                  <div key={entry.id} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                      <div style={{fontSize:13,fontWeight:700,color:C.t1}}>🕐 {entry.time}</div>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{fontSize:14,fontWeight:800,color:C.green}}>{Math.round(entry.total?.kcal||0)} kcal</span>
-                        <button onClick={()=>removeFromJournal(entry.id)} style={{background:"none",border:"none",color:C.t4,fontSize:14,cursor:"pointer",padding:"2px"}}>✕</button>
+                {MEALS.map(meal => {
+                  const entries = journalEntries.filter(e => mealOfEntry(e) === meal.id);
+                  if (!entries.length) return null;
+                  const kcal = entries.reduce((a,e)=>a+(e.total?.kcal||0),0);
+                  return (
+                    <div key={meal.id} style={{marginBottom:16}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                        <div style={{fontSize:12,fontWeight:800,color:C.t2}}>{meal.icon} {meal.label}</div>
+                        <div style={{fontSize:12,fontWeight:800,color:C.green}}>{Math.round(kcal)} kcal</div>
                       </div>
+                      {entries.map((entry) => (
+                        <div key={entry.id} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:12,padding:"12px 14px",marginBottom:8}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                            <div style={{fontSize:12,fontWeight:600,color:C.t3}}>🕐 {entry.time}</div>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <span style={{fontSize:14,fontWeight:800,color:C.green}}>{Math.round(entry.total?.kcal||0)} kcal</span>
+                              <button onClick={()=>removeFromJournal(entry.id)} style={{background:"none",border:"none",color:C.t4,fontSize:14,cursor:"pointer",padding:"2px"}}>✕</button>
+                            </div>
+                          </div>
+                          {Array.isArray(entry.aliments) && entry.aliments.length>0 && (
+                            <div style={{fontSize:12,color:C.t3,lineHeight:1.5}}>{entry.aliments.map(a=>a.nom).join(" · ")}</div>
+                          )}
+                          <div style={{fontSize:10,color:C.t4,marginTop:4}}>P{Math.round(entry.total?.prot||0)}g · G{Math.round(entry.total?.gluc||0)}g · L{Math.round(entry.total?.lip||0)}g</div>
+                          <div style={{display:"flex",alignItems:"center",gap:5,marginTop:8,paddingTop:8,borderTop:`1px solid ${C.bord}`}}>
+                            <span style={{fontSize:10,color:C.t4,marginRight:2}}>Repas :</span>
+                            {MEALS.map(m=>{
+                              const cur=mealOfEntry(entry)===m.id;
+                              return <button key={m.id} onClick={()=>setEntryMeal(entry.id,m.id)} title={m.label} style={{width:28,height:26,borderRadius:7,cursor:"pointer",fontSize:13,background:cur?"rgba(59,111,240,0.2)":C.bg,border:`1px solid ${cur?C.blue:C.bord}`,opacity:cur?1:0.55}}>{m.icon}</button>;
+                            })}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    {Array.isArray(entry.aliments) && entry.aliments.length>0 && (
-                      <div style={{fontSize:12,color:C.t3,lineHeight:1.5}}>
-                        {entry.aliments.map(a=>a.nom).join(" · ")}
-                      </div>
-                    )}
-                    <div style={{fontSize:10,color:C.t4,marginTop:4}}>
-                      P{Math.round(entry.total?.prot||0)}g · G{Math.round(entry.total?.gluc||0)}g · L{Math.round(entry.total?.lip||0)}g
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <div style={{textAlign:"center",padding:"36px 20px"}}>
@@ -4383,20 +4430,34 @@ function ProgressPhotos({ profile, token, onClose }) {
 }
 
 // ─── BILAN HEBDOMADAIRE ──────────────────────────────────────────────────────
+// Bornes d'une semaine calendaire (lundi → dimanche), décalée de `offsetWeeks`.
+function weekBounds(offsetWeeks) {
+  const noon = new Date(); noon.setHours(12, 0, 0, 0);
+  const dow = (noon.getDay() + 6) % 7; // 0 = lundi
+  const monday = new Date(noon); monday.setDate(noon.getDate() - dow + (offsetWeeks || 0) * 7);
+  const days = []; for (let i = 0; i < 7; i++) { const d = new Date(monday); d.setDate(monday.getDate() + i); days.push(d); }
+  const start = new Date(days[0]); start.setHours(0, 0, 0, 0);
+  const end = new Date(days[6]); end.setHours(23, 59, 59, 999);
+  const keys = days.map(d => d.toISOString().split("T")[0]);
+  const fmt = (d) => `${d.getDate()} ${d.toLocaleDateString("fr-FR", { month: "short" }).replace(".", "")}`;
+  return { start, end, days, keys, mondayKey: keys[0], label: `${fmt(days[0])} – ${fmt(days[6])}` };
+}
+
 function BilanPanel({ profile, firstName, token, onClose, programCals }) {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
   const [insights, setInsights] = useState(null);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const wb = weekBounds(weekOffset);
 
   useEffect(() => {
-    const now = new Date();
-    const weekAgo = new Date(now.getTime() - 7 * 864e5);
-    const weekKey = (d) => d.toISOString().split("T")[0];
+    setLoading(true); setStats(null); setInsights(null);
+    const { start, end, keys, mondayKey, label } = weekBounds(weekOffset);
 
     // 1. Séances
     let sessions = [];
     try { sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]"); } catch {}
-    const weekSessions = sessions.filter(s => s && s.type !== "weight" && s.date && new Date(s.date) >= weekAgo);
+    const weekSessions = sessions.filter(s => s && s.type !== "weight" && s.date && new Date(s.date) >= start && new Date(s.date) <= end);
     const totalDuree = weekSessions.reduce((a, s) => a + (s.duree || 0), 0);
     const sportsCount = {};
     weekSessions.forEach(s => { sportsCount[s.sport] = (sportsCount[s.sport] || 0) + 1; });
@@ -4414,13 +4475,12 @@ function BilanPanel({ profile, firstName, token, onClose, programCals }) {
     let nutritionDays = 0, totalKcal = 0, totalProt = 0;
     try {
       const journal = JSON.parse(localStorage.getItem("coach_nutrition_journal") || "{}");
-      for (let d = 0; d < 7; d++) {
-        const key = weekKey(new Date(now.getTime() - d * 864e5));
+      keys.forEach(key => {
         if (journal[key] && journal[key].length > 0) {
           nutritionDays++;
           journal[key].forEach(e => { totalKcal += (e.total?.kcal || 0); totalProt += (e.total?.prot || 0); });
         }
-      }
+      });
     } catch {}
     const avgKcal = nutritionDays > 0 ? Math.round(totalKcal / nutritionDays) : null;
     const avgProt = nutritionDays > 0 ? Math.round(totalProt / nutritionDays) : null;
@@ -4429,10 +4489,7 @@ function BilanPanel({ profile, firstName, token, onClose, programCals }) {
     let readinessScores = [];
     try {
       const all = JSON.parse(localStorage.getItem("coach_readiness") || "{}");
-      for (let d = 0; d < 7; d++) {
-        const key = weekKey(new Date(now.getTime() - d * 864e5));
-        if (all[key]) readinessScores.push(all[key].total);
-      }
+      keys.forEach(key => { if (all[key]) readinessScores.push(all[key].total); });
     } catch {}
     const avgReadiness = readinessScores.length > 0 ? Math.round(readinessScores.reduce((a, b) => a + b, 0) / readinessScores.length) : null;
 
@@ -4440,22 +4497,34 @@ function BilanPanel({ profile, firstName, token, onClose, programCals }) {
     let weightTrend = null;
     try {
       const log = JSON.parse(localStorage.getItem("coach_weight_log") || "[]");
-      const recent = log.filter(w => w.date && new Date(w.date) >= weekAgo).sort((a, b) => new Date(a.date) - new Date(b.date));
+      const recent = log.filter(w => w.date && new Date(w.date) >= start && new Date(w.date) <= end).sort((a, b) => new Date(a.date) - new Date(b.date));
       if (recent.length >= 2) weightTrend = { start: recent[0].weight, end: recent[recent.length - 1].weight, diff: (recent[recent.length - 1].weight - recent[0].weight).toFixed(1) };
     } catch {}
 
     const s = { weekSessions: weekSessions.length, totalDuree, sportsCount, muscleCount, neglected, nutritionDays, avgKcal, avgProt, avgReadiness, weightTrend };
     setStats(s);
 
-    // Appel IA pour les insights
+    // Insights : archivés pour les semaines passées, sinon générés puis archivés.
+    let bilans = {};
+    try { bilans = JSON.parse(localStorage.getItem("coach_bilans") || "{}"); } catch {}
+    if (weekOffset < 0 && bilans[mondayKey]?.insights) {
+      setInsights(bilans[mondayKey].insights);
+      setLoading(false);
+      return;
+    }
+    if (s.weekSessions === 0 && s.nutritionDays === 0) {
+      setInsights(null);
+      setLoading(false);
+      return;
+    }
     (async () => {
       try {
-        const summary = `Bilan semaine de ${firstName} :
+        const summary = `Bilan de la semaine (${label}) de ${firstName} :
 - ${s.weekSessions} séances (${s.totalDuree} min total)
 - Sports : ${Object.entries(s.sportsCount).map(([k, v]) => `${k}×${v}`).join(", ") || "aucun"}
 - Muscles travaillés : ${Object.entries(s.muscleCount).map(([k, v]) => `${k}×${v}`).join(", ") || "aucun"}
 - Muscles négligés : ${s.neglected.join(", ") || "aucun"}
-- Nutrition : ${s.nutritionDays} jour(s) tracké(s), moyenne ${s.avgKcal || "?"} kcal/j et ${s.avgProt || "?"} g prot/j (cible programme : ${programCals?.cible || "?"} kcal/j et ${programCals?.prot || "?"}g prot/j)
+- Nutrition : ${s.nutritionDays} jour(s) tracké(s), moyenne ${s.avgKcal || "?"} kcal/j et ${s.avgProt || "?"} g prot/j (cible : ${programCals?.cible || "?"} kcal/j et ${programCals?.prot || "?"}g prot/j)
 - Forme moyenne : ${s.avgReadiness || "?"}%
 - Poids : ${s.weightTrend ? `${s.weightTrend.start} → ${s.weightTrend.end} kg (${s.weightTrend.diff > 0 ? "+" : ""}${s.weightTrend.diff})` : "non suivi"}
 - Objectif : ${profile?.goal || "forme"}
@@ -4466,22 +4535,31 @@ Donne un bilan franc (points forts, points faibles) et 3 ajustements concrets po
           body: JSON.stringify({ system: "Tu es un coach sportif et nutritionniste expert. Fais un bilan hebdomadaire franc et personnalisé.", messages: [{ role: "user", content: summary }], max_tokens: 600 })
         });
         const data = await r.json();
-        setInsights(data.content?.[0]?.text || "Bilan indisponible.");
+        const txt = data.content?.[0]?.text || "Bilan indisponible.";
+        setInsights(txt);
+        try { bilans[mondayKey] = { insights: txt, generatedAt: new Date().toISOString(), weekSessions: s.weekSessions, totalDuree: s.totalDuree, label }; localStorage.setItem("coach_bilans", JSON.stringify(bilans)); } catch {}
       } catch { setInsights("Impossible de générer le bilan."); }
       setLoading(false);
     })();
-  }, []);
+  }, [weekOffset]);
 
   const s = stats;
 
   return (
     <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
-      <div style={{background:"linear-gradient(135deg,#1e3a8a,#7c3aed)",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-        <div>
-          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>📊 Bilan de la semaine</div>
-          <div style={{fontSize:11,color:"rgba(255,255,255,0.65)"}}>Les 7 derniers jours</div>
+      <div style={{background:"linear-gradient(135deg,#1e3a8a,#7c3aed)",padding:"14px 16px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>📊 Bilan hebdo</div>
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
         </div>
-        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:10}}>
+          <button onClick={()=>setWeekOffset(o=>o-1)} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:9,width:34,height:34,color:"#fff",fontSize:18,cursor:"pointer"}}>‹</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#fff"}}>{wb.label}</div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.6)"}}>{weekOffset===0?"Cette semaine":weekOffset===-1?"Semaine dernière":`Il y a ${-weekOffset} semaines`}</div>
+          </div>
+          <button onClick={()=>setWeekOffset(o=>Math.min(0,o+1))} disabled={weekOffset>=0} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:9,width:34,height:34,color:"#fff",fontSize:18,cursor:weekOffset>=0?"not-allowed":"pointer",opacity:weekOffset>=0?0.35:1}}>›</button>
+        </div>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"16px"}}>
         {!s ? (
@@ -4551,8 +4629,13 @@ Donne un bilan franc (points forts, points faibles) et 3 ajustements concrets po
               <div style={{fontSize:12,fontWeight:800,color:"#a78bfa",textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>🧠 Analyse du coach</div>
               {loading ? (
                 <div style={{fontSize:13,color:C.t3}}>Analyse en cours...</div>
+              ) : insights ? (
+                <>
+                  <NutritionDisplay text={insights}/>
+                  {weekOffset<0 && <div style={{fontSize:10,color:C.t4,marginTop:10,fontStyle:"italic"}}>Bilan archivé de cette semaine.</div>}
+                </>
               ) : (
-                <NutritionDisplay text={insights}/>
+                <div style={{fontSize:13,color:C.t3,lineHeight:1.5}}>Pas assez de données sur cette semaine pour un bilan. Enregistre des séances et tes repas, puis reviens ici.</div>
               )}
             </div>
           </>
