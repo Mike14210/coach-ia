@@ -964,7 +964,23 @@ function ExCard({ex,idx,accent,logData,onLogSet}) {
   );
 }
 
-function SessionBlock({session,accent,logData,onLogSet,onLaunch}) {
+// Détermine la prochaine séance du programme à faire, par rotation, d'après
+// l'historique réel (coach_sessions). Après A → B → C → A…
+function nextProgramSessionIndex(sessions) {
+  if (!Array.isArray(sessions) || !sessions.length) return 0;
+  const names = sessions.map(s => s && s.name);
+  let log = [];
+  try { log = JSON.parse(localStorage.getItem("coach_sessions") || "[]"); } catch {}
+  const done = log
+    .filter(e => e && e.date && names.some(n => n && (e.titre === n || e.objectif === n)))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!done.length) return 0;
+  const last = done[0];
+  const idx = names.findIndex(n => n && (last.titre === n || last.objectif === n));
+  return idx === -1 ? 0 : (idx + 1) % names.length;
+}
+
+function SessionBlock({session,accent,logData,onLogSet,onLaunch,isToday}) {
   const cols={bleu:C.blue,vert:C.green,violet:"#a78bfa",orange:C.orange};
   const color=cols[session.color]||accent;
   const [open,setOpen]=useState(true);
@@ -973,9 +989,10 @@ function SessionBlock({session,accent,logData,onLogSet,onLaunch}) {
   return (
     <div style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,marginBottom:12,overflow:"hidden",boxShadow:"0 2px 12px rgba(0,0,0,0.08)"}}>
       <div style={{background:color+"10",borderBottom:`2px solid ${color}22`,padding:"13px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:color}}/>
           <span style={{fontWeight:800,fontSize:14,color:C.t1}}>{session.name}</span>
+          {isToday && <span style={{fontSize:10,fontWeight:800,color:"#0f1117",background:color,borderRadius:20,padding:"2px 8px"}}>⭐ Séance du jour</span>}
           <span style={{fontSize:11,color:"#9ca3af",marginLeft:4}}>{session.exs.length} exercices</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -2767,17 +2784,31 @@ function HydrationCard({ profile, onOpen, compact }) {
   const todayKey = new Date().toISOString().split("T")[0];
   const [waterMl, setWaterMl] = useState(0);
   const [waterStreak, setWaterStreak] = useState(0);
-  const [workoutToday, setWorkoutToday] = useState(false);
   const clipId = useRef("btl" + Math.random().toString(36).slice(2, 8)).current;
+  // Calculé au rendu (pas seulement au montage) : le bonus séance apparaît dès
+  // qu'une séance du jour est enregistrée, sans avoir à recharger l'accueil.
+  const workoutToday = workoutDaysSet().has(todayKey);
   const waterGoal = waterBaseGoal(profile?.weight) + (workoutToday ? 500 : 0);
-  useEffect(() => {
+  const syncWater = () => {
     try {
       const wm = JSON.parse(localStorage.getItem("coach_water") || "{}");
       setWaterMl(wm[todayKey] || 0);
-      const wo = workoutDaysSet();
-      setWorkoutToday(wo.has(todayKey));
-      setWaterStreak(computeWaterStreak(wm, waterBaseGoal(profile?.weight), wo));
+      setWaterStreak(computeWaterStreak(wm, waterBaseGoal(profile?.weight), workoutDaysSet()));
     } catch {}
+  };
+  useEffect(() => {
+    syncWater();
+    const onVis = () => { if (document.visibilityState === "visible") syncWater(); };
+    window.addEventListener("focus", syncWater);
+    window.addEventListener("coach:water", syncWater); // synchro instantanée entre cartes (même onglet)
+    window.addEventListener("storage", syncWater);      // synchro entre onglets
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("focus", syncWater);
+      window.removeEventListener("coach:water", syncWater);
+      window.removeEventListener("storage", syncWater);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
   // Litres sans arrondi trompeur : 750 → "0,75", 500 → "0,5", 1000 → "1".
   const fmtL = (ml) => (ml/1000).toFixed(2).replace(/0+$/, "").replace(/\.$/, "").replace(".", ",");
@@ -2791,6 +2822,7 @@ function HydrationCard({ profile, onOpen, compact }) {
       const keys = Object.keys(all).sort().reverse().slice(0, 60);
       const trimmed = {}; keys.forEach(k => { trimmed[k] = all[k]; });
       localStorage.setItem("coach_water", JSON.stringify(trimmed));
+      try { window.dispatchEvent(new Event("coach:water")); } catch {}
       setWaterStreak(computeWaterStreak(trimmed, waterBaseGoal(profile?.weight), workoutDaysSet()));
     } catch {}
     if (before < waterGoal && val >= waterGoal) { try { navigator.vibrate && navigator.vibrate([120,60,120]); } catch {} }
@@ -3429,7 +3461,8 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
   const [showAdapt, setShowAdapt] = useState(false);
   const [adaptTime, setAdaptTime] = useState(null);
   const [adaptEquip, setAdaptEquip] = useState(null);
-  const [adaptSession, setAdaptSession] = useState(null);
+  const [adaptSession, setAdaptSession] = useState(() => nextProgramSessionIndex(parsed?.sessions));
+  const nextIdx = nextProgramSessionIndex(parsed?.sessions);
   const adaptOpts = [
     {id:null,icon:"🔄",label:"Mon équipement habituel"},
     {id:"Salle complète",icon:"🏋️",label:"Salle complète"},
@@ -3558,7 +3591,7 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
         {tab==="seances"&&(
           <div>
             {parsed?.sessions?.length>0 ? parsed.sessions.map((s,i)=>(
-              <SessionBlock key={i} session={s} accent={cols[s.color]||"#3b6ff0"} logData={logData} onLogSet={onLogSet}
+              <SessionBlock key={i} session={s} accent={cols[s.color]||"#3b6ff0"} logData={logData} onLogSet={onLogSet} isToday={i===nextIdx}
                 onLaunch={(sess)=>{ try{localStorage.setItem("coach_program_session",JSON.stringify(sess));}catch{}; onLaunchSeance&&onLaunchSeance(); }}/>
             )) : (
               <div style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>
@@ -3660,7 +3693,7 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
               // Sauver l'ajustement du jour
               try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:adaptTime,equip:adaptEquip}));}catch{}
               // Porter la séance PRÉVUE du programme dans le runner (choisie, ou la 1re par défaut)
-              const chosen = (adaptSession!=null && parsed?.sessions?.[adaptSession]) ? parsed.sessions[adaptSession] : (parsed?.sessions?.[0] || null);
+              const chosen = (adaptSession!=null && parsed?.sessions?.[adaptSession]) ? parsed.sessions[adaptSession] : (parsed?.sessions?.[nextIdx] || null);
               if(chosen){ try{localStorage.setItem("coach_program_session",JSON.stringify(chosen));}catch{} }
               // Lancer la séance (même format que Séance du jour)
               if(onLaunchSeance) onLaunchSeance();
