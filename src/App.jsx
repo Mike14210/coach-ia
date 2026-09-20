@@ -3,7 +3,7 @@ import { MuscleMap, computeSessionMuscles, computeRecentMuscles } from "./muscle
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Remplace par ton domaine quand il sera configuré
-const API = "http://51.159.146.5";
+const API = "https://api.iacoachsportif.eu";
 
 // ─── TOKENS ───────────────────────────────────────────────────────────────────
 // Dark canvas + white cards — fitness app signature
