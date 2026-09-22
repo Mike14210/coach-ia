@@ -5099,6 +5099,13 @@ export default function App() {
 
   // Calculer le streak au démarrage
   useEffect(() => { setStreakCount(sessionStreakCount()); }, []);
+
+  // PWA : enregistrement du service worker (installable + hors-ligne)
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
   const [todayReadiness,setTodayReadiness]=useState(null);
 
   // Charger le score du jour au démarrage
