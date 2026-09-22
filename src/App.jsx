@@ -5100,11 +5100,22 @@ export default function App() {
   // Calculer le streak au démarrage
   useEffect(() => { setStreakCount(sessionStreakCount()); }, []);
 
-  // PWA : enregistrement du service worker (installable + hors-ligne)
+  // PWA : service worker + injection du manifest et des métas (le index.html
+  // n'est pas dans le repo, donc on branche tout ici, au démarrage).
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     }
+    const head = document.head;
+    const ensure = (selector, make) => { if (!document.querySelector(selector)) head.appendChild(make()); };
+    ensure('link[rel="manifest"]', () => { const l = document.createElement("link"); l.rel = "manifest"; l.href = "/manifest.webmanifest"; return l; });
+    ensure('link[rel="apple-touch-icon"]', () => { const l = document.createElement("link"); l.rel = "apple-touch-icon"; l.href = "/apple-touch-icon.png"; return l; });
+    const meta = (name, content) => ensure(`meta[name="${name}"]`, () => { const m = document.createElement("meta"); m.name = name; m.content = content; return m; });
+    meta("theme-color", "#0a0c12");
+    meta("apple-mobile-web-app-capable", "yes");
+    meta("mobile-web-app-capable", "yes");
+    meta("apple-mobile-web-app-status-bar-style", "black-translucent");
+    meta("apple-mobile-web-app-title", "Coach IA");
   }, []);
   const [todayReadiness,setTodayReadiness]=useState(null);
 
