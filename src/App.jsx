@@ -5065,6 +5065,108 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
 }
 
 
+// ─── SYNC SERVEUR (multi-appareils) ───────────────────────────────────────────
+// Clés durables synchronisées. Exclues volontairement : coach_session_inprogress,
+// coach_today_adjust, coach_program_session (transitoires) et coach_progress_photos (trop lourd).
+const SYNC_KEYS = ["coach_sessions","coach_water","coach_nutrition_journal","coach_readiness","coach_weight_log","coach_bilans","coach_recipes","exercise_weights"];
+
+const _sessionKey = (s) => s && (s.id != null ? "id:" + s.id : [s.date, s.titre, s.sport, s.duree, s.status].join("|"));
+function _mergeSessions(local, srv) {
+  const m = new Map();
+  (Array.isArray(srv) ? srv : []).forEach(s => m.set(_sessionKey(s), s));
+  (Array.isArray(local) ? local : []).forEach(s => m.set(_sessionKey(s), s)); // le local prime
+  return [...m.values()].sort((a,b) => new Date(b.date||0) - new Date(a.date||0)).slice(0, 300);
+}
+function _mergeWater(local, srv) {
+  const out = { ...(srv||{}) };
+  Object.entries(local||{}).forEach(([d, ml]) => { out[d] = Math.max(Number(out[d])||0, Number(ml)||0); }); // max/jour : on n'a pas pu boire moins
+  return out;
+}
+function _mergeJournal(local, srv) {
+  const out = { ...(srv||{}) };
+  Object.entries(local||{}).forEach(([d, arr]) => {
+    const byId = new Map();
+    (out[d]||[]).forEach(e => byId.set(e.id ?? JSON.stringify(e), e));
+    (arr||[]).forEach(e => byId.set(e.id ?? JSON.stringify(e), e));
+    out[d] = [...byId.values()];
+  });
+  return out;
+}
+function _mergeWeight(local, srv) {
+  const m = new Map();
+  (Array.isArray(srv) ? srv : []).forEach(w => m.set(w.date, w));
+  (Array.isArray(local) ? local : []).forEach(w => m.set(w.date, w));
+  return [...m.values()].sort((a,b) => new Date(a.date) - new Date(b.date));
+}
+function _mergeBilans(local, srv) {
+  const out = { ...(srv||{}) };
+  Object.entries(local||{}).forEach(([w, v]) => {
+    const cur = out[w];
+    if (!cur || new Date(v?.generatedAt||0) >= new Date(cur?.generatedAt||0)) out[w] = v; // le plus récent gagne
+  });
+  return out;
+}
+function _mergeRecipes(local, srv) {
+  const k = (r) => r && (r.id ?? r.nom ?? r.name ?? JSON.stringify(r));
+  const m = new Map();
+  (Array.isArray(srv) ? srv : []).forEach(r => m.set(k(r), r));
+  (Array.isArray(local) ? local : []).forEach(r => m.set(k(r), r));
+  return [...m.values()];
+}
+const _mergePreferLocal = (local, srv) => ({ ...(srv||{}), ...(local||{}) }); // union objet, local prioritaire
+function mergeState(key, local, srv) {
+  switch (key) {
+    case "coach_sessions": return _mergeSessions(local, srv);
+    case "coach_water": return _mergeWater(local, srv);
+    case "coach_nutrition_journal": return _mergeJournal(local, srv);
+    case "coach_weight_log": return _mergeWeight(local, srv);
+    case "coach_bilans": return _mergeBilans(local, srv);
+    case "coach_recipes": return _mergeRecipes(local, srv);
+    case "coach_readiness":
+    case "exercise_weights": return _mergePreferLocal(local, srv);
+    default: return local != null ? local : srv;
+  }
+}
+
+// Récupère l'état serveur, fusionne avec le local, réécrit en local, repousse ce qui a bougé.
+async function syncPull(token) {
+  let server = {};
+  try {
+    const r = await fetch(API + "/api/state", { headers: { "Authorization": `Bearer ${token}` } });
+    if (!r.ok) return false;
+    server = await r.json();
+  } catch { return false; }
+  const toPush = {};
+  for (const key of SYNC_KEYS) {
+    let local = null, hasLocal = false;
+    try { const raw = localStorage.getItem(key); if (raw != null) { local = JSON.parse(raw); hasLocal = true; } } catch {}
+    const sEntry = server[key];
+    let srv = null, hasSrv = false;
+    if (sEntry && typeof sEntry.value === "string") { try { srv = JSON.parse(sEntry.value); hasSrv = true; } catch {} }
+    if (!hasSrv && hasLocal) { toPush[key] = JSON.stringify(local); continue; }
+    if (hasSrv && !hasLocal) { try { localStorage.setItem(key, JSON.stringify(srv)); } catch {} continue; }
+    if (!hasSrv && !hasLocal) continue;
+    const mergedStr = JSON.stringify(mergeState(key, local, srv));
+    try { localStorage.setItem(key, mergedStr); } catch {}
+    if (mergedStr !== sEntry.value) toPush[key] = mergedStr;
+  }
+  if (Object.keys(toPush).length) {
+    try { await fetch(API + "/api/state", { method: "PUT", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }, body: JSON.stringify(toPush) }); } catch {}
+  }
+  try { window.dispatchEvent(new Event("coach:water")); window.dispatchEvent(new Event("coach:synced")); } catch {}
+  return true;
+}
+// Pousse les clés indiquées (valeurs locales courantes) vers le serveur.
+async function syncPush(token, keys) {
+  const body = {};
+  for (const key of (keys && keys.length ? keys : SYNC_KEYS)) {
+    const raw = localStorage.getItem(key);
+    if (raw != null) body[key] = raw;
+  }
+  if (!Object.keys(body).length) return;
+  try { await fetch(API + "/api/state", { method: "PUT", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` }, body: JSON.stringify(body) }); } catch {}
+}
+
 export default function App() {
   const [token,setToken]=useState(()=>store.get("token"));
   const [user,setUser]=useState(()=>store.get("user"));
@@ -5117,6 +5219,32 @@ export default function App() {
     meta("apple-mobile-web-app-status-bar-style", "black-translucent");
     meta("apple-mobile-web-app-title", "Coach IA");
   }, []);
+
+  // Sync serveur multi-appareils : pull+fusion à l'ouverture, push débounced
+  // à chaque changement, re-pull au retour dans l'appli.
+  useEffect(() => {
+    if (!token) return;
+    let dirty = new Set();
+    let timer = null;
+    let suppress = false;
+    const flush = () => { timer = null; if (!dirty.size) return; const keys = [...dirty]; dirty = new Set(); syncPush(token, keys); };
+    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(flush, 2500); };
+    const orig = localStorage.setItem.bind(localStorage);
+    const patched = (k, v) => { orig(k, v); if (!suppress && SYNC_KEYS.includes(k)) { dirty.add(k); schedule(); } };
+    localStorage.setItem = patched;
+    const pull = () => { suppress = true; return syncPull(token).finally(() => { suppress = false; setStreakCount(sessionStreakCount()); }); };
+    pull();
+    const onVis = () => { if (document.visibilityState === "visible") pull(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", pull);
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (dirty.size) syncPush(token, [...dirty]);
+      if (localStorage.setItem === patched) localStorage.setItem = orig;
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", pull);
+    };
+  }, [token]);
   const [todayReadiness,setTodayReadiness]=useState(null);
 
   // Charger le score du jour au démarrage
