@@ -5220,6 +5220,8 @@ export default function App() {
     meta("apple-mobile-web-app-title", "Coach IA");
   }, []);
 
+  const [todayReadiness,setTodayReadiness]=useState(null);
+
   // Sync serveur multi-appareils : pull+fusion à l'ouverture, push débounced
   // à chaque changement, re-pull au retour dans l'appli.
   useEffect(() => {
@@ -5232,7 +5234,11 @@ export default function App() {
     const orig = localStorage.setItem.bind(localStorage);
     const patched = (k, v) => { orig(k, v); if (!suppress && SYNC_KEYS.includes(k)) { dirty.add(k); schedule(); } };
     localStorage.setItem = patched;
-    const pull = () => { suppress = true; return syncPull(token).finally(() => { suppress = false; setStreakCount(sessionStreakCount()); }); };
+    const pull = () => { suppress = true; return syncPull(token).finally(() => {
+      suppress = false;
+      setStreakCount(sessionStreakCount());
+      try { const all = JSON.parse(localStorage.getItem("coach_readiness") || "{}"); const t = new Date().toISOString().split("T")[0]; setTodayReadiness(all[t] || null); } catch {}
+    }); };
     pull();
     const onVis = () => { if (document.visibilityState === "visible") pull(); };
     document.addEventListener("visibilitychange", onVis);
@@ -5245,7 +5251,6 @@ export default function App() {
       window.removeEventListener("focus", pull);
     };
   }, [token]);
-  const [todayReadiness,setTodayReadiness]=useState(null);
 
   // Charger le score du jour au démarrage
   useEffect(() => {
