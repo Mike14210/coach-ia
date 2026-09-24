@@ -71,6 +71,34 @@ function defaultWarmup(mins) {
 function defaultCooldown(mins) {
   return { duree: mins || 5, exercices: ["Étirement quadriceps - 30sec", "Étirement ischio-jambiers - 30sec", "Étirement dos et épaules - 30sec", "Respiration profonde - 60sec"] };
 }
+// Barème unique échauffement / retour au calme selon la durée de séance.
+function phaseMins(dur) {
+  const d = Number(dur) || 45;
+  return { wm: d <= 20 ? 3 : d <= 35 ? 5 : d <= 50 ? 7 : 10, cm: d <= 20 ? 2 : d <= 35 ? 4 : 5 };
+}
+function sumSecs(list) { return (list || []).reduce((a, x) => a + parseExSecs(x), 0); }
+// Garde les premiers mouvements tenant dans `mins` (au moins 2).
+function fitToMins(list, mins) {
+  const max = Math.max(1, mins) * 60, out = [];
+  let t = 0;
+  for (const x of (list || [])) { const d = parseExSecs(x); if (out.length >= 2 && t + d > max) break; out.push(x); t += d; }
+  return out;
+}
+function phaseFromList(list) { return { duree: Math.max(1, Math.round(sumSecs(list) / 60)), exercices: list }; }
+// SOURCE UNIQUE échauffement / retour au calme d'une séance du PROGRAMME :
+// utilisée par l'affichage du programme ET par le runner -> ce qu'on voit = ce qu'on fait.
+function programSessionPhases(session, dur) {
+  const { wm, cm } = phaseMins(dur);
+  const wl = normExList(session && session.warmup), cl = normExList(session && session.cooldown);
+  return {
+    warmup: phaseFromList(wl.length ? wl : defaultWarmup(wm).exercices),
+    cooldown: phaseFromList(cl.length ? cl : defaultCooldown(cm).exercices),
+  };
+}
+// Un message IA est-il un programme complet (et pas une réponse de chat / une adaptation) ?
+function isFullProgram(p) {
+  return !!(p && p.isParsed && p.cals && Array.isArray(p.sessions) && p.sessions.length > 0 && p.sessions.every(x => x && Array.isArray(x.exs) && x.exs.length > 0));
+}
 // Coerce toute une séance au format du runner (main + warmup/cooldown en chaînes).
 function normalizeSeance(parsed, wm, cm) {
   const p = parsed || {};
@@ -92,10 +120,11 @@ function normalizeSeance(parsed, wm, cm) {
   return p;
 }
 // Construit une séance-du-jour (format runner) à partir d'une séance du PROGRAMME.
-// C'est le pont : les exos prévus du programme deviennent le "main" du runner.
+// C'est le pont : échauffement, exos et retour au calme du programme -> runner.
 function buildSeanceFromProgramSession(session, opts) {
   const o = opts || {};
-  const wm = o.warmupMins || 5, cm = o.cooldownMins || 5;
+  const base = programSessionPhases(session, o.baseDuration);
+  let warmup = base.warmup, cooldown = base.cooldown;
   let main = (session.exs || []).map(ex => ({
     name: ex.name || "Exercice",
     sets: String(ex.sets || "3"),
@@ -103,19 +132,51 @@ function buildSeanceFromProgramSession(session, opts) {
     rest: String(ex.rest || "60s").replace(" sec", "s").replace(" secondes", "s"),
     desc: ex.desc || ""
   }));
-  // Adaptation au temps dispo (~8 min/exercice muscu) : on garde les prioritaires.
+  // Adaptation au temps dispo : on raccourcit échauffement/retour au calme puis
+  // on garde les exercices prioritaires (~8 min/exercice muscu).
   if (o.time) {
-    const mainMins = Math.max(8, o.time - wm - cm);
+    const { wm, cm } = phaseMins(o.time);
+    if (warmup.duree > wm) warmup = phaseFromList(fitToMins(warmup.exercices, wm));
+    if (cooldown.duree > cm) cooldown = phaseFromList(fitToMins(cooldown.exercices, cm));
+    const mainMins = Math.max(8, o.time - warmup.duree - cooldown.duree);
     const maxEx = Math.max(3, Math.floor(mainMins / 8));
     if (main.length > maxEx) main = main.slice(0, maxEx);
   }
   return normalizeSeance({
     titre: session.name || "Séance du programme",
-    warmup: defaultWarmup(wm),
-    main,
-    cooldown: defaultCooldown(cm),
+    warmup, main, cooldown,
+    program: o.program || null,
     conseil: o.equip ? `Adaptée à ton matériel du jour : ${o.equip}.` : "Suis la technique et respecte les temps de repos."
-  }, wm, cm);
+  }, warmup.duree, cooldown.duree);
+}
+
+// Remplace les exercices non réalisables avec le matériel du jour (même muscles,
+// même schéma), en conservant l'ordre et le nombre d'exercices.
+async function adaptMainToEquip(main, equip, token, level) {
+  const list = main.map((ex, i) => `${i+1}. ${ex.name} — ${ex.sets}×${ex.reps}, repos ${ex.rest}`).join("\n");
+  const prompt = `Séance prévue (niveau ${level || "intermédiaire"}) :\n${list}\n\nMatériel disponible AUJOURD'HUI uniquement : ${equip}.\nCONSIGNE : garde tel quel chaque exercice réalisable avec ce matériel. Remplace UNIQUEMENT ceux qui ne le sont pas par l'équivalent le plus proche (mêmes muscles, même schéma séries/reps/repos). Renvoie EXACTEMENT ${main.length} exercices, dans le même ordre. Réponds UNIQUEMENT avec un tableau JSON : [{"name":string,"sets":number,"reps":string,"rest":string,"desc":string}] ; desc = description technique détaillée. Aucun texte hors du JSON.`;
+  const r = await fetch(API + "/api/coach", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ system: "Tu es un coach sportif expert. Réponds UNIQUEMENT en JSON valide.", messages: [{ role: "user", content: prompt }], max_tokens: 2500 })
+  });
+  const data = await r.json();
+  let t = (data.content?.[0]?.text || "").replace(/```json/gi, "").replace(/```/g, "").trim();
+  const a = t.indexOf("["), b = t.lastIndexOf("]");
+  if (a < 0 || b <= a) throw new Error("Réponse invalide");
+  const arr = JSON.parse(t.slice(a, b + 1));
+  if (!Array.isArray(arr) || arr.length < Math.min(3, main.length)) throw new Error("Réponse incomplète");
+  return arr.map((ex, i) => {
+    const name = ex.name || ex.nom || main[i]?.name || "Exercice";
+    const same = main[i] && main[i].name === name;
+    return {
+      name,
+      sets: String(ex.sets || main[i]?.sets || "3"),
+      reps: String(ex.reps || main[i]?.reps || "10"),
+      rest: String(ex.rest || main[i]?.rest || "60s").replace(" sec", "s").replace(" secondes", "s"),
+      desc: same && main[i].desc ? main[i].desc : (ex.desc || ex.description || "")
+    };
+  });
 }
 
 // Déduit les groupes musculaires travaillés à partir des noms d'exercices.
@@ -297,6 +358,7 @@ function makePrompt(p, firstName) {
     : `Metabolisme HOMME: ${Math.round(10*p.weight+6.25*p.height-5*p.age+5)} kcal`;
   const duration = p.duration || 45;
   const dg = durationGuidance(duration);
+  const { wm: pwm, cm: pcm } = phaseMins(duration);
   const age = p.age || 40;
   const weight = p.weight || 75;
   const ageCtx = age >= 85 ? `
@@ -386,9 +448,65 @@ Lundi : Séance A
 Mercredi : Séance B
 [/WEEK]
 [SESSION name="Séance A — Nom" color="bleu"]
+[WARMUP]Mouvement 1 - 60sec | Mouvement 2 - 45sec | Mouvement 3 - 60sec[/WARMUP]
 [EX name="Nom exercice" sets="3" reps="10-12" rest="75s"]Description technique détaillée : position de départ, mouvement, erreurs à éviter, muscles ciblés[/EX]
+[COOLDOWN]Étirement 1 - 30sec | Étirement 2 - 30sec | Respiration - 60sec[/COOLDOWN]
 [/SESSION]
-[PROG]progression en 2-3 phrases[/PROG]`;
+[PROG]progression en 2-3 phrases[/PROG]
+
+ÉCHAUFFEMENT ET RETOUR AU CALME — OBLIGATOIRES DANS CHAQUE SESSION :
+- [WARMUP] : 3 à 5 mouvements spécifiques aux muscles et articulations sollicités par CETTE séance, total ≈ ${pwm} min (plus long uniquement si une règle d'âge ci-dessus l'impose).
+- [COOLDOWN] : 3 à 5 étirements / respiration ciblant les muscles travaillés, total ≈ ${pcm} min.
+- Format de chaque mouvement : "Nom - durée" (ex : "Rotations d'épaules - 45sec"), séparés par " | ". Jamais vide.`;
+}
+
+// Semaine courante du programme, DÉDUITE de l'historique de chat (déjà stocké côté
+// serveur) : persistante au rechargement et identique sur tous les appareils.
+// = plus grand "Semaine N." demandé depuis la dernière génération complète, compté
+// seulement si l'IA a bien renvoyé un programme complet derrière.
+function programWeekFromMsgs(msgs) {
+  const list = Array.isArray(msgs) ? msgs : [];
+  let start = -1;
+  list.forEach((m, i) => { if (m && m.role === "user" && /^Génère mon programme complet/.test(m.content || "")) start = i; });
+  let week = 1;
+  for (let i = start + 1; i < list.length; i++) {
+    const m = list[i];
+    if (!m || m.role !== "user") continue;
+    const k = (m.content || "").match(/^Semaine (\d+)\. Fais évoluer/);
+    if (!k) continue;
+    const reply = list[i + 1];
+    if (reply && reply.role === "assistant" && isFullProgram(reply.parsed || parse(reply.content))) week = Math.max(week, parseInt(k[1], 10));
+  }
+  return week;
+}
+
+// ─── PROMPT CHAT (distinct du prompt programme) ───────────────────────────────
+// Les questions libres ne doivent JAMAIS produire un programme balisé : sinon la
+// réponse est prise pour un nouveau programme. Le programme actif est fourni en
+// résumé pour que les réponses restent cohérentes avec ce que l'utilisateur fait.
+function makeChatPrompt(p, firstName, prog) {
+  const pp = p || {};
+  const progTxt = prog && Array.isArray(prog.sessions) && prog.sessions.length
+    ? prog.sessions.map(x => `- ${x.name} : ${(x.exs || []).map(e => `${e.name} ${e.sets}×${e.reps}`).join(", ")}`).join("\n")
+    : "Aucun programme généré pour l'instant.";
+  let next = "";
+  try { if (prog && prog.sessions && prog.sessions.length) next = `\nProchaine séance prévue : ${prog.sessions[nextProgramSessionIndex(prog.sessions)]?.name || ""}.`; } catch {}
+  return `Tu es le coach sportif personnel de ${firstName || "l'utilisateur"}, expert de l'entraînement des adultes de 40 à 70 ans.
+
+PROFIL : ${pp.gender || "non précisé"}, ${pp.age || "?"} ans, ${pp.weight || "?"} kg, ${pp.height || "?"} cm. Objectif : ${pp.goal || "?"}. Niveau : ${pp.level || "?"}. ${pp.days || "?"} j/semaine, ${pp.duration || 45} min/séance. Équipement : ${pp.equip || "?"}.${pp.limits ? " Limitations : " + pp.limits + "." : ""}${pp.cardio ? " Cardio : " + pp.cardio + "." : ""}
+
+PROGRAMME ACTIF :
+${progTxt}${next}
+${prog && prog.cals ? `Nutrition : ${prog.cals.cible} kcal/j, ${prog.cals.prot} g de protéines/j.` : ""}
+
+RÈGLES DE RÉPONSE :
+- Français, tutoiement, ton direct et concret. Ne pose pas de question si tu as déjà l'info pour répondre.
+- Réponds à la question posée, en t'appuyant sur le profil et le programme actif.
+- Longueur : 80 à 250 mots, sauf si on te demande explicitement une séance ou une liste détaillée.
+- Format autorisé UNIQUEMENT : paragraphes courts, listes "- " ou "1. ", **gras** pour les mots clés.
+- INTERDIT : toute balise entre crochets ([BILAN], [SESSION], [EX]...), titres "#", tableaux, blocs de code.
+- Ne réécris JAMAIS le programme complet. Si ${firstName || "l'utilisateur"} veut changer tout son programme, explique ce que tu changerais et indique-lui d'utiliser « Évoluer » ou de régénérer le programme depuis son profil.
+- Douleur aiguë, persistante, thoracique ou avec gonflement : recommande d'arrêter et de consulter un professionnel de santé.`;
 }
 
 // ─── PARSER ───────────────────────────────────────────────────────────────────
@@ -420,7 +538,10 @@ function parse(text) {
     while ((em = er.exec(sm[3]))) {
       exs.push({name:em[1], sets:em[2], reps:em[3], rest:em[4], desc:em[5].trim()});
     }
-    sessions.push({name:sm[1], color:sm[2]||"bleu", exs});
+    const wu = sm[3].match(/\[WARMUP\]([\s\S]*?)\[\/WARMUP\]/i);
+    const cd = sm[3].match(/\[COOLDOWN\]([\s\S]*?)\[\/COOLDOWN\]/i);
+    const splitPh = t => t ? t.split(/\s*\|\s*|\n+/).map(x => x.replace(/^(?:[-•*]|\d+[.)])\s*/, "").trim()).filter(Boolean) : [];
+    sessions.push({name:sm[1], color:sm[2]||"bleu", exs, warmup: splitPh(wu && wu[1]), cooldown: splitPh(cd && cd[1])});
   }
   
   // Detect if this is a structured program
@@ -964,23 +1085,90 @@ function ExCard({ex,idx,accent,logData,onLogSet}) {
   );
 }
 
-// Détermine la prochaine séance du programme à faire, par rotation, d'après
-// l'historique réel (coach_sessions). Après A → B → C → A…
-function nextProgramSessionIndex(sessions) {
-  if (!Array.isArray(sessions) || !sessions.length) return 0;
-  const names = sessions.map(s => s && s.name);
+// Rotation des séances du programme (A → B → C → A…) d'après l'historique réel
+// (coach_sessions, synchronisé). Priorité à l'index enregistré par le runner
+// (programSig/programIdx), repli sur la correspondance de nom (historique ancien).
+function programSig(sessions) { return (sessions || []).map(x => (x && x.name) || "").join("|"); }
+function lastProgramEntry(sessions) {
+  if (!Array.isArray(sessions) || !sessions.length) return null;
+  const names = sessions.map(x => x && x.name), sig = programSig(sessions);
   let log = [];
   try { log = JSON.parse(localStorage.getItem("coach_sessions") || "[]"); } catch {}
-  const done = log
-    .filter(e => e && e.date && names.some(n => n && (e.titre === n || e.objectif === n)))
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
-  if (!done.length) return 0;
-  const last = done[0];
-  const idx = names.findIndex(n => n && (last.titre === n || last.objectif === n));
-  return idx === -1 ? 0 : (idx + 1) % names.length;
+  const sorted = (Array.isArray(log) ? log : []).filter(e => e && e.date).sort((a, b) => new Date(b.date) - new Date(a.date));
+  for (const e of sorted) {
+    if (e.programSig === sig && Number.isInteger(e.programIdx) && e.programIdx >= 0 && e.programIdx < names.length) return { idx: e.programIdx, date: e.date };
+    const idx = names.findIndex(n => n && (e.programName === n || e.titre === n || e.objectif === n));
+    if (idx !== -1) return { idx, date: e.date };
+  }
+  return null;
+}
+function nextProgramSessionIndex(sessions) {
+  const l = lastProgramEntry(sessions);
+  return l ? (l.idx + 1) % sessions.length : 0;
+}
+function programDoneTodayIndex(sessions) {
+  const l = lastProgramEntry(sessions);
+  return l && new Date(l.date).toDateString() === new Date().toDateString() ? l.idx : -1;
+}
+// Programme ÉDITABLE (clé coach_program, synchronisée) : source de vérité des séances
+// dès qu'elle existe ; sinon séances parsées du programme IA.
+function serializeProgram(list) {
+  return (list || []).map(x => ({
+    name: x.name, color: x.color,
+    warmup: normExList(x.warmup), cooldown: normExList(x.cooldown),
+    exs: (x.exs || []).map(e => ({ name: e.name, sets: String(e.sets || ""), reps: String(e.reps || ""), rest: String(e.rest || ""), desc: e.desc || "" }))
+  }));
+}
+function activeProgramSessions(parsed) {
+  try {
+    const raw = JSON.parse(localStorage.getItem("coach_program") || "null");
+    const saved = Array.isArray(raw) ? raw : (raw && raw.sessions);
+    if (Array.isArray(saved) && saved.length && saved.every(x => x && Array.isArray(x.exs))) return saved;
+  } catch {}
+  return (parsed && parsed.sessions) || [];
+}
+// Stocké horodaté : la synchro garde la version la plus RÉCENTE (pas "serveur prime"),
+// sinon un pull juste après une génération pourrait réimposer l'ancien programme.
+function saveProgram(list) {
+  try { localStorage.setItem("coach_program", JSON.stringify({ at: new Date().toISOString(), sessions: serializeProgram(list) })); } catch {}
+}
+function seedProgram(p) {
+  if (p && Array.isArray(p.sessions) && p.sessions.length) saveProgram(p.sessions);
+}
+// Met une séance du programme en file pour le runner, avec son index dans le programme.
+function queueProgramSession(sessions, i) {
+  const x = sessions && sessions[i];
+  if (!x) return false;
+  try { localStorage.setItem("coach_program_session", JSON.stringify({ ...x, _idx: i, _sig: programSig(sessions) })); } catch { return false; }
+  return true;
 }
 
-function SessionBlock({session,accent,logData,onLogSet,onLaunch,isToday}) {
+// Liste échauffement / retour au calme dans le programme (mêmes données que le runner).
+function PhaseList({title, color, phase}) {
+  const [tip, setTip] = useState(-1);
+  if (!phase || !phase.exercices || !phase.exercices.length) return null;
+  return (
+    <div style={{background:color+"10",border:`1px solid ${color}33`,borderRadius:12,padding:"10px 12px",margin:"2px 0 10px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+        <span style={{fontSize:12,fontWeight:800,color}}>{title}</span>
+        <span style={{fontSize:11,color:C.t3,fontWeight:700}}>{phase.duree} min</span>
+      </div>
+      {phase.exercices.map((ex,i)=>(
+        <div key={i} onClick={()=>setTip(tip===i?-1:i)} style={{padding:"7px 0",borderTop:i?`1px solid ${C.bord}`:"none",cursor:"pointer"}}>
+          <div style={{display:"flex",gap:8,fontSize:12,color:C.t1,alignItems:"center"}}>
+            <span style={{color,fontWeight:800,minWidth:14}}>{i+1}.</span>
+            <span style={{flex:1}}>{ex}</span>
+            <span style={{color:C.t3,fontSize:11}}>{tip===i?"▲":"ⓘ"}</span>
+          </div>
+          {tip===i&&<div style={{fontSize:11,color:C.t3,lineHeight:1.5,marginTop:4,paddingLeft:22}}>{moveTip(ex)}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SessionBlock({session,accent,logData,onLogSet,onLaunch,isToday,doneToday,nextLabel,duration}) {
+  const phases=programSessionPhases(session, duration);
   const cols={bleu:C.blue,vert:C.green,violet:"#a78bfa",orange:C.orange};
   const color=cols[session.color]||accent;
   const [open,setOpen]=useState(true);
@@ -992,7 +1180,8 @@ function SessionBlock({session,accent,logData,onLogSet,onLaunch,isToday}) {
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:color}}/>
           <span style={{fontWeight:800,fontSize:14,color:C.t1}}>{session.name}</span>
-          {isToday && <span style={{fontSize:10,fontWeight:800,color:"#0f1117",background:color,borderRadius:20,padding:"2px 8px"}}>⭐ Séance du jour</span>}
+          {isToday && <span style={{fontSize:10,fontWeight:800,color:"#0f1117",background:color,borderRadius:20,padding:"2px 8px"}}>⭐ {nextLabel||"Séance du jour"}</span>}
+          {doneToday && <span style={{fontSize:10,fontWeight:800,color:"#0f1117",background:C.green,borderRadius:20,padding:"2px 8px"}}>✅ Faite aujourd'hui</span>}
           <span style={{fontSize:11,color:"#9ca3af",marginLeft:4}}>{session.exs.length} exercices</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1007,11 +1196,13 @@ function SessionBlock({session,accent,logData,onLogSet,onLaunch,isToday}) {
         </button>
       )}
       {open&&<div style={{padding:"10px"}}>
+        <PhaseList title="🔥 Échauffement" color={C.orange} phase={phases.warmup}/>
         {session.exs.map((ex,i)=>(
           <ExCard key={i} ex={ex} idx={i} accent={color}
             logData={logData[ex.name]||{sets:Array(parseInt(ex.sets)||3).fill(false),weights:Array(parseInt(ex.sets)||3).fill(0)}}
             onLogSet={(sets,weights)=>onLogSet(ex.name,sets,weights)}/>
         ))}
+        <PhaseList title="🧘 Retour au calme" color={C.green} phase={phases.cooldown}/>
       </div>}
     </div>
   );
@@ -1074,7 +1265,7 @@ function Bubble({msg,profile,firstName,logData,onLogSet}) {
               <div style={{marginTop:12}}>
                 <div style={{fontSize:10,color:C.t3,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>Suivi des séances</div>
                 {msg.parsed.sessions.map((sess,i)=>(
-                  <SessionBlock key={i} session={sess} accent={C.blue} logData={logData} onLogSet={onLogSet}/>
+                  <SessionBlock key={i} session={sess} accent={C.blue} logData={logData} onLogSet={onLogSet} duration={profile?.duration}/>
                 ))}
               </div>
             )}
@@ -1606,28 +1797,39 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
             const today = new Date().toISOString().split("T")[0];
             if (a && a.date === today && (a.time || a.equip)) adj = a;
           } catch {}
-          const dur = adj?.time || 45;
-          const wm = dur <= 20 ? 3 : dur <= 35 ? 5 : dur <= 50 ? 7 : 10;
-          const cm = dur <= 20 ? 2 : dur <= 35 ? 4 : 5;
-          const sd = buildSeanceFromProgramSession(ps, { warmupMins: wm, cooldownMins: cm, time: adj?.time, equip: adj?.equip });
+          const baseDur = Number(profile?.duration) || 45;
+          const dur = adj?.time || baseDur;
+          const meta = Number.isInteger(ps._idx) ? { idx: ps._idx, sig: ps._sig || "", name: ps.name || "" } : null;
+          const sd0 = buildSeanceFromProgramSession(ps, { baseDuration: baseDur, time: adj?.time, equip: adj?.equip, program: meta });
+          const equipList = adj?.equip ? [adj.equip] : (profile?.equip ? [profile.equip] : ["Poids du corps"]);
           setSport("musculation");
           setObjectif(ps.name || "Séance du programme");
-          setMuscles(inferMuscleGroups(ps.exs));
           if (adj?.equip) setEquip([adj.equip]);
-          if (adj?.time) setDuree(adj.time);
-          setSeanceData(sd);
-          setPhase("warmup");
-          setWarmupExIdx(0);
-          setScreen("seance");
-          try { if (window.Notification && Notification.permission === "default") Notification.requestPermission().catch(()=>{}); } catch {}
-          try {
-            localStorage.setItem("coach_session_inprogress", JSON.stringify({
-              savedAt: new Date().toISOString(),
-              sport: "musculation", seanceType: "", duree: dur, objectif: ps.name || "Programme",
-              equip: adj?.equip ? [adj.equip] : (profile?.equip ? [profile.equip] : ["Poids du corps"]),
-              seanceData: sd, phase: "warmup", sessionLog: []
-            }));
-          } catch {}
+          if (adj?.time) setDuree(adj.time); else setDuree(baseDur);
+          const startProgram = (sd) => {
+            setMuscles(inferMuscleGroups(sd.main));
+            setSeanceData(sd);
+            setPhase("warmup");
+            setWarmupExIdx(0);
+            setScreen("seance");
+            try { if (window.Notification && Notification.permission === "default") Notification.requestPermission().catch(()=>{}); } catch {}
+            try {
+              localStorage.setItem("coach_session_inprogress", JSON.stringify({
+                savedAt: new Date().toISOString(),
+                sport: "musculation", seanceType: "", duree: dur, objectif: ps.name || "Programme",
+                equip: equipList, seanceData: sd, phase: "warmup", sessionLog: []
+              }));
+            } catch {}
+          };
+          // Matériel différent de l'habituel : on remplace réellement les exercices non faisables.
+          if (adj?.equip && adj.equip !== profile?.equip) {
+            setScreen("loading");
+            adaptMainToEquip(sd0.main, adj.equip, token, profile?.level)
+              .then(main => startProgram({ ...sd0, main, conseil: `Exercices adaptés à ton matériel du jour : ${adj.equip}.` }))
+              .catch(() => startProgram({ ...sd0, conseil: `Adaptation automatique indisponible : si un exercice demande du matériel absent, remplace-le par un équivalent (${adj.equip}).` }));
+          } else {
+            startProgram(sd0);
+          }
           return; // on ignore la reprise : on démarre la séance du programme
         }
       }
@@ -1700,7 +1902,8 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
           titre: seanceData?.titre || `Séance ${sport}`,
           duree, objectif: (objectif || seanceType), muscles: (muscles && muscles.length ? muscles : inferMuscleGroups(seanceData?.main || [])),
           exercises: updated,
-          status: "in_progress"
+          status: "in_progress",
+          ...(seanceData?.program ? { programSig: seanceData.program.sig, programIdx: seanceData.program.idx, programName: seanceData.program.name } : {})
         };
         const sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]");
         const today = new Date().toDateString();
@@ -1713,8 +1916,10 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
     });
   };
 
-  const saveSession = async () => {
-    if (sessionLog.length === 0) return;
+  // force=true : une séance du PROGRAMME menée au bout compte même sans série saisie
+  // (sinon la rotation A→B→C ne peut pas avancer).
+  const saveSession = async (force) => {
+    if (sessionLog.length === 0 && !(force === true && seanceData?.program)) return;
     const entry = {
       date: new Date().toISOString(),
       type: "seance",
@@ -1723,7 +1928,8 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
       duree,
       objectif: (objectif || seanceType),
       muscles: (muscles && muscles.length ? muscles : inferMuscleGroups(seanceData?.main || [])),
-      exercises: sessionLog
+      exercises: sessionLog,
+      ...(seanceData?.program ? { programSig: seanceData.program.sig, programIdx: seanceData.program.idx, programName: seanceData.program.name } : {})
     };
     try {
       await apiFetch("/api/session", {
@@ -2489,7 +2695,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   </div>
                 )}
 
-                <button onClick={()=>{setPhase("cooldown");saveSession();speak(`Excellent travail ! Place au retour au calme. ${seanceData.cooldown.duree} minutes d'étirements.`);}} style={{width:"100%",marginTop:12,padding:"12px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
+                <button onClick={()=>{setPhase("cooldown");saveSession(true);speak(`Excellent travail ! Place au retour au calme. ${seanceData.cooldown.duree} minutes d'étirements.`);}} style={{width:"100%",marginTop:12,padding:"12px",background:C.green,border:"none",borderRadius:10,color:"#fff",fontWeight:700,fontSize:13,cursor:"pointer"}}>
                   Retour au calme →
                 </button>
               </div>
@@ -2587,7 +2793,7 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   <div style={{fontSize:13,fontWeight:700,color:C.t2,marginBottom:12}}>Comment c'était ?</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
                     {[{id:"facile",icon:"😴",l:"Trop facile",c:"#6b7280"},{id:"bien",icon:"💪",l:"Bien",c:C.green},{id:"dur",icon:"🔥",l:"Difficile",c:C.orange},{id:"epuise",icon:"💀",l:"Trop dur",c:C.red}].map(r=>(
-                      <button key={r.id} onClick={()=>{setRating(r.id);saveSession();speak(`${r.l} ! Bien joue ${firstName}.`);}} style={{background:rating===r.id?r.c:`${r.c}22`,border:`2px solid ${rating===r.id?r.c:r.c+"55"}`,borderRadius:14,padding:"16px 8px",cursor:"pointer",textAlign:"center"}}>
+                      <button key={r.id} onClick={()=>{setRating(r.id);saveSession(true);speak(`${r.l} ! Bien joue ${firstName}.`);}} style={{background:rating===r.id?r.c:`${r.c}22`,border:`2px solid ${rating===r.id?r.c:r.c+"55"}`,borderRadius:14,padding:"16px 8px",cursor:"pointer",textAlign:"center"}}>
                         <div style={{fontSize:28,marginBottom:6}}>{r.icon}</div>
                         <div style={{fontSize:11,fontWeight:700,color:r.c}}>{r.l}</div>
                       </button>
@@ -3451,7 +3657,7 @@ function Journal({token, onClose}) {
 }
 
 
-function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack, onLaunchSeance}) {
+function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet, onBack, onLaunchSeance, programWeek}) {
   const [tab, setTab] = useState("analyse"); // analyse | seances | progression | nutrition
   const [showChat, setShowChat] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);
@@ -3461,8 +3667,27 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
   const [showAdapt, setShowAdapt] = useState(false);
   const [adaptTime, setAdaptTime] = useState(null);
   const [adaptEquip, setAdaptEquip] = useState(null);
-  const [adaptSession, setAdaptSession] = useState(() => nextProgramSessionIndex(parsed?.sessions));
-  const nextIdx = nextProgramSessionIndex(parsed?.sessions);
+  const [sessions, setSessions] = useState(() => activeProgramSessions(parsed));
+  const [editing, setEditing] = useState(false);
+  // Toute mutation persiste immédiatement coach_program (source de vérité éditable, synchronisée).
+  // Échauffement / retour au calme sont conservés (non éditables ici).
+  const mutate = (fn) => setSessions(prev => {
+    const next = fn(prev);
+    saveProgram(next);
+    return next;
+  });
+  const cols2 = ["bleu","vert","violet","orange"];
+  const updateSession = (i, patch) => mutate(prev => prev.map((s,idx)=> idx===i ? {...s, ...patch} : s));
+  const removeSession = (i) => mutate(prev => prev.filter((_,idx)=> idx!==i));
+  const addSession = () => mutate(prev => [...prev, { name:`Séance ${String.fromCharCode(65+prev.length)}`, color: cols2[prev.length % cols2.length], exs:[] }]);
+  const updateEx = (si, ei, patch) => mutate(prev => prev.map((s,idx)=> idx!==si ? s : {...s, exs:(s.exs||[]).map((e,j)=> j===ei ? {...e, ...patch} : e)}));
+  const removeEx = (si, ei) => mutate(prev => prev.map((s,idx)=> idx!==si ? s : {...s, exs:(s.exs||[]).filter((_,j)=> j!==ei)}));
+  const addEx = (si) => mutate(prev => prev.map((s,idx)=> idx!==si ? s : {...s, exs:[...(s.exs||[]), {name:"Nouvel exercice", sets:"3", reps:"10", rest:"60s", desc:""}]}));
+  // Séances lançables : au moins 1 exercice (une séance vide ajoutée dans l'éditeur n'entre pas dans la rotation).
+  const runnable = sessions.filter(s => s && (s.exs||[]).length > 0);
+  const [adaptSession, setAdaptSession] = useState(() => nextProgramSessionIndex(runnable));
+  const nextIdx = nextProgramSessionIndex(runnable);
+  const doneIdx = programDoneTodayIndex(runnable);
   const adaptOpts = [
     {id:null,icon:"🔄",label:"Mon équipement habituel"},
     {id:"Salle complète",icon:"🏋️",label:"Salle complète"},
@@ -3514,7 +3739,7 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
             <button onClick={onBack} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>← Accueil</button>
             {<button onClick={()=>setShowAdapt(true)} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer",fontWeight:600}}>🔧 Adapter aujourd'hui</button>}
-            <div style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>Programme de {firstName}</div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>Programme de {firstName}{programWeek?` · Semaine ${programWeek}`:""}</div>
           </div>
           
           {/* Dashboard KPIs */}
@@ -3590,14 +3815,45 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
         {/* Séances tab */}
         {tab==="seances"&&(
           <div>
-            {parsed?.sessions?.length>0 ? parsed.sessions.map((s,i)=>(
-              <SessionBlock key={i} session={s} accent={cols[s.color]||"#3b6ff0"} logData={logData} onLogSet={onLogSet} isToday={i===nextIdx}
-                onLaunch={(sess)=>{ try{localStorage.setItem("coach_program_session",JSON.stringify(sess));}catch{}; onLaunchSeance&&onLaunchSeance(); }}/>
-            )) : (
-              <div style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>
-                <div style={{fontSize:40,marginBottom:12}}>📋</div>
-                <div>Aucune séance trouvée dans ce programme.</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontSize:12,color:C.t3}}>{sessions.length} séance{sessions.length>1?"s":""}</div>
+              <button onClick={()=>setEditing(e=>!e)} style={{background:editing?C.green:C.surf,border:`1px solid ${editing?C.green:C.bord}`,borderRadius:9,padding:"7px 14px",fontSize:12,fontWeight:800,color:editing?"#fff":C.t2,cursor:"pointer"}}>{editing?"✓ Terminé":"✏️ Modifier"}</button>
+            </div>
+
+            {editing ? (
+              <div>
+                {sessions.map((s,i)=>(
+                  <div key={i} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:14,marginBottom:12}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                      <input value={s.name} onChange={e=>updateSession(i,{name:e.target.value})} style={{flex:1,background:C.bg,border:`1px solid ${C.bord}`,borderRadius:8,padding:"9px 10px",color:C.t1,fontSize:13,fontWeight:700}}/>
+                      <button onClick={()=>{ if(confirm(`Supprimer "${s.name}" ?`)) removeSession(i); }} style={{background:"rgba(239,68,68,0.12)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,width:36,height:36,color:"#f87171",fontSize:15,cursor:"pointer",flexShrink:0}}>🗑</button>
+                    </div>
+                    {(s.exs||[]).map((ex,j)=>(
+                      <div key={j} style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                        <input value={ex.name} onChange={e=>updateEx(i,j,{name:e.target.value})} placeholder="Exercice" style={{flex:1,minWidth:0,background:C.bg,border:`1px solid ${C.bord}`,borderRadius:8,padding:"8px 9px",color:C.t1,fontSize:12}}/>
+                        <input value={ex.sets} onChange={e=>updateEx(i,j,{sets:e.target.value})} style={{width:34,textAlign:"center",background:C.bg,border:`1px solid ${C.bord}`,borderRadius:8,padding:"8px 2px",color:C.t2,fontSize:12}}/>
+                        <span style={{fontSize:11,color:C.t4}}>×</span>
+                        <input value={ex.reps} onChange={e=>updateEx(i,j,{reps:e.target.value})} style={{width:46,textAlign:"center",background:C.bg,border:`1px solid ${C.bord}`,borderRadius:8,padding:"8px 2px",color:C.t2,fontSize:12}}/>
+                        <button onClick={()=>removeEx(i,j)} style={{background:"none",border:"none",color:C.t4,fontSize:15,cursor:"pointer",padding:"0 2px",flexShrink:0}}>✕</button>
+                      </div>
+                    ))}
+                    <button onClick={()=>addEx(i)} style={{marginTop:4,background:"none",border:`1px dashed ${C.bord}`,borderRadius:8,padding:"8px",width:"100%",color:C.t3,fontSize:12,fontWeight:700,cursor:"pointer"}}>＋ Ajouter un exercice</button>
+                  </div>
+                ))}
+                <button onClick={addSession} style={{width:"100%",background:"rgba(16,185,129,0.1)",border:`1px dashed ${C.green}`,borderRadius:12,padding:"12px",color:C.green,fontSize:13,fontWeight:800,cursor:"pointer",marginBottom:8}}>＋ Ajouter une séance</button>
+                <p style={{fontSize:11,color:C.t4,textAlign:"center",lineHeight:1.5}}>Tes modifications sont enregistrées automatiquement et synchronisées entre tes appareils. L'échauffement et le retour au calme de chaque séance sont conservés.</p>
               </div>
+            ) : (
+              runnable.length>0 ? runnable.map((s,i)=>(
+                <SessionBlock key={i} session={s} accent={cols[s.color]||"#3b6ff0"} logData={logData} onLogSet={onLogSet}
+                  isToday={i===nextIdx && i!==doneIdx} doneToday={i===doneIdx} nextLabel={doneIdx>=0?"Prochaine séance":"Séance du jour"} duration={profile?.duration}
+                  onLaunch={()=>{ queueProgramSession(runnable, i); onLaunchSeance&&onLaunchSeance(); }}/>
+              )) : (
+                <div style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>
+                  <div style={{fontSize:40,marginBottom:12}}>📋</div>
+                  <div>Aucune séance. Ajoute-en une avec « Modifier ».</div>
+                </div>
+              )
             )}
           </div>
         )}
@@ -3663,11 +3919,11 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
           <div style={{width:"100%",maxWidth:680,margin:"0 auto",background:C.surfHigh,borderRadius:"17px 17px 0 0",padding:"20px 15px 28px",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{fontSize:15,fontWeight:800,color:C.t1,marginBottom:3}}>Adapter la séance du jour</div>
             <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.45}}>Choisis la séance prévue, ajuste temps/matériel : elle se lance en mode guidé (échauffement → séance → retour au calme).</div>
-            {parsed?.sessions?.length>0 && (
+            {runnable.length>0 && (
               <>
                 <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>📋 Séance prévue aujourd'hui</div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
-                  {parsed.sessions.map((s,i)=>(
+                  {runnable.map((s,i)=>(
                     <button key={i} onClick={()=>setAdaptSession(i)} style={{flex:"1 0 45%",padding:"9px",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:700,background:adaptSession===i?C.violet+"22":C.bg,border:`1.5px solid ${adaptSession===i?C.violet:C.bord}`,color:adaptSession===i?"#c4b5fd":C.t2}}>{s.name}</button>
                   ))}
                 </div>
@@ -3693,8 +3949,8 @@ function ProgramDashboard({parsed, profile, firstName, token, logData, onLogSet,
               // Sauver l'ajustement du jour
               try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:adaptTime,equip:adaptEquip}));}catch{}
               // Porter la séance PRÉVUE du programme dans le runner (choisie, ou la 1re par défaut)
-              const chosen = (adaptSession!=null && parsed?.sessions?.[adaptSession]) ? parsed.sessions[adaptSession] : (parsed?.sessions?.[nextIdx] || null);
-              if(chosen){ try{localStorage.setItem("coach_program_session",JSON.stringify(chosen));}catch{} }
+              const idx = (adaptSession!=null && runnable[adaptSession]) ? adaptSession : nextIdx;
+              queueProgramSession(runnable, idx);
               // Lancer la séance (même format que Séance du jour)
               if(onLaunchSeance) onLaunchSeance();
             }} style={{width:"100%",padding:"13px",background:C.green,border:"none",borderRadius:12,color:"#fff",fontWeight:800,fontSize:14,cursor:"pointer"}}>
@@ -4875,7 +5131,149 @@ function FreeSessionPanel({ profile, onClose, onSaved }) {
   );
 }
 
-function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onWater, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan, onStreaks, streakCount, onPhotos, onFreeSession}) {
+// ─── RECORDS (PR par exercice) ────────────────────────────────────────────────
+// Calcule la charge max par exercice à partir de l'historique réel des séances.
+function computePRs() {
+  let sessions = [];
+  try { sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]"); } catch {}
+  const byEx = {};
+  sessions.slice().sort((a, b) => new Date(a.date) - new Date(b.date)).forEach(s => {
+    (s.exercises || []).forEach(ex => {
+      let bw = 0, br = 0;
+      (ex.sets || []).forEach(set => {
+        const w = parseFloat(set.weight) || 0, r = parseFloat(set.reps) || 0;
+        if (w > bw) { bw = w; br = r; }
+      });
+      if (bw <= 0) return;
+      const key = String(ex.name || "").toLowerCase().trim();
+      if (!key) return;
+      if (!byEx[key]) byEx[key] = { name: ex.name, best: { weight: 0, reps: 0, date: null }, history: [] };
+      byEx[key].history.push({ date: s.date, weight: bw });
+      if (bw > byEx[key].best.weight) byEx[key].best = { weight: bw, reps: br, date: s.date };
+    });
+  });
+  return Object.values(byEx).sort((a, b) => b.best.weight - a.best.weight);
+}
+
+function RecordsPanel({ onClose }) {
+  const prs = computePRs();
+  const Spark = ({ data }) => {
+    if (!data || data.length < 2) return null;
+    const w = 96, h = 28, pad = 3;
+    const ws = data.map(d => d.weight);
+    const min = Math.min(...ws), max = Math.max(...ws), span = (max - min) || 1;
+    const pts = data.map((d, i) => {
+      const x = pad + (i / (data.length - 1)) * (w - 2 * pad);
+      const y = h - pad - ((d.weight - min) / span) * (h - 2 * pad);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    return <svg width={w} height={h} style={{flexShrink:0}}><polyline points={pts} fill="none" stroke={C.green} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/></svg>;
+  };
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:`linear-gradient(135deg,#b45309,#f59e0b)`,padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>🏆 Mes records</div>
+          <div style={{fontSize:11,color:"rgba(255,255,255,0.75)"}}>Charge max par exercice</div>
+        </div>
+        <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:16}}>
+        {prs.length === 0 ? (
+          <div style={{textAlign:"center",padding:"48px 20px",color:C.t3}}>
+            <div style={{fontSize:44,marginBottom:14}}>🏋️</div>
+            <div style={{fontSize:14,fontWeight:700,color:C.t1,marginBottom:8}}>Pas encore de record</div>
+            <div style={{fontSize:12,lineHeight:1.5}}>Renseigne les charges pendant tes séances de muscu et tes records apparaîtront ici, avec ta progression.</div>
+          </div>
+        ) : prs.map((pr) => (
+          <div key={pr.name} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:"14px 16px",marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:14,fontWeight:800,color:C.t1,marginBottom:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{pr.name}</div>
+                <div style={{fontSize:11,color:C.t4}}>Record le {pr.best.date ? new Date(pr.best.date).toLocaleDateString("fr-FR",{day:"numeric",month:"short"}) : "—"}</div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0}}>
+                <div style={{fontSize:20,fontWeight:900,color:"#fbbf24"}}>{pr.best.weight} kg</div>
+                {pr.best.reps > 0 && <div style={{fontSize:11,color:C.t3}}>× {pr.best.reps} reps</div>}
+              </div>
+            </div>
+            {pr.history.length >= 2 && (
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:10,paddingTop:10,borderTop:`1px solid ${C.bord}`}}>
+                <span style={{fontSize:10,color:C.t4}}>{pr.history.length} séances · progression</span>
+                <Spark data={pr.history}/>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── CALENDRIER DE LA SEMAINE ─────────────────────────────────────────────────
+const SPORT_ICON = { running:"🏃", velo:"🚴", natation:"🏊", marche:"🚶", musculation:"💪", calistenie:"🤸", hiit:"🔥", crossfit:"🏋️", yoga:"🧘", pilates:"🌀" };
+function WeekCalendarPanel({ onClose }) {
+  const [weekOffset, setWeekOffset] = useState(0);
+  const wb = weekBounds(weekOffset);
+  let sessions = [];
+  try { sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]"); } catch {}
+  const todayKey = new Date().toISOString().split("T")[0];
+  const DAYS = ["Lundi","Mardi","Mercredi","Jeudi","Vendredi","Samedi","Dimanche"];
+  const rows = wb.days.map((day, i) => {
+    const start = new Date(day); start.setHours(0,0,0,0);
+    const end = new Date(day); end.setHours(23,59,59,999);
+    const ds = sessions.filter(s => s && s.type !== "weight" && s.date && new Date(s.date) >= start && new Date(s.date) <= end);
+    return { key: wb.keys[i], day, name: DAYS[i], sessions: ds };
+  });
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg,zIndex:200,display:"flex",flexDirection:"column",fontFamily:"system-ui,sans-serif"}}>
+      <div style={{background:`linear-gradient(135deg,#065f46,#10b981)`,padding:"14px 16px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{fontSize:16,fontWeight:800,color:"#fff"}}>📅 Ma semaine</div>
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:8,padding:"6px 12px",color:"#fff",fontSize:12,cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:10}}>
+          <button onClick={()=>setWeekOffset(o=>o-1)} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:9,width:34,height:34,color:"#fff",fontSize:18,cursor:"pointer"}}>‹</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#fff"}}>{wb.label}</div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.6)"}}>{weekOffset===0?"Cette semaine":weekOffset===-1?"Semaine dernière":weekOffset===1?"Semaine prochaine":`${weekOffset<0?"Il y a":"Dans"} ${Math.abs(weekOffset)} semaines`}</div>
+          </div>
+          <button onClick={()=>setWeekOffset(o=>o+1)} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:9,width:34,height:34,color:"#fff",fontSize:18,cursor:"pointer"}}>›</button>
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",padding:"12px 16px 40px"}}>
+        {rows.map((r) => {
+          const isToday = r.key === todayKey;
+          const totalMin = r.sessions.reduce((a,s)=>a+(s.duree||0),0);
+          return (
+            <div key={r.key} style={{display:"flex",gap:12,marginBottom:10}}>
+              <div style={{width:44,flexShrink:0,textAlign:"center",paddingTop:2}}>
+                <div style={{fontSize:10,color:isToday?C.green:C.t4,fontWeight:700,textTransform:"uppercase"}}>{r.name.slice(0,3)}</div>
+                <div style={{fontSize:20,fontWeight:900,color:isToday?C.green:C.t2}}>{r.day.getDate()}</div>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                {r.sessions.length === 0 ? (
+                  <div style={{background:C.surf,border:`1px dashed ${C.bord}`,borderRadius:12,padding:"12px 14px",fontSize:12,color:C.t4}}>Repos</div>
+                ) : r.sessions.map((s, j) => (
+                  <div key={j} style={{background:C.surf,border:`1px solid ${isToday?C.green+"55":C.bord}`,borderRadius:12,padding:"11px 14px",marginBottom:6,display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{fontSize:22,flexShrink:0}}>{SPORT_ICON[s.sport]||"✨"}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.t1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.titre||s.sport}</div>
+                      <div style={{fontSize:11,color:C.t4}}>{s.duree?`${s.duree} min`:""}{s.free?" · libre":""}</div>
+                    </div>
+                  </div>
+                ))}
+                {r.sessions.length > 1 && <div style={{fontSize:10,color:C.t4,paddingLeft:2}}>{r.sessions.length} séances · {totalMin} min</div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep, onHIIT, onNutrition, onWater, onProfil, onWeight, onMuscles, onLogout, onReadiness, readiness, onBilan, onStreaks, streakCount, onPhotos, onFreeSession, onRecords, onCalendar}) {
   const sports = [
     {id:"musculation",icon:"💪",label:"Musculation"},{id:"calistenie",icon:"🤸",label:"Callisthénie"},
     {id:"running",icon:"🏃",label:"Running"},{id:"velo",icon:"🚴",label:"Vélo"},
@@ -5007,6 +5405,20 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
           </button>
         </div>
 
+        {/* Records & Calendrier */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <button onClick={onRecords} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:"14px 12px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:4}}>🏆</div>
+            <div style={{fontSize:12,fontWeight:700,color:C.t2,marginTop:2}}>Records</div>
+            <div style={{fontSize:10,color:C.t4}}>Charges max</div>
+          </button>
+          <button onClick={onCalendar} style={{background:C.surf,border:`1px solid ${C.bord}`,borderRadius:14,padding:"14px 12px",cursor:"pointer",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:4}}>📅</div>
+            <div style={{fontSize:12,fontWeight:700,color:C.t2,marginTop:2}}>Ma semaine</div>
+            <div style={{fontSize:10,color:C.t4}}>Calendrier</div>
+          </button>
+        </div>
+
         {/* Bilan hebdomadaire */}
         <button onClick={onBilan} style={{width:"100%",background:`linear-gradient(135deg,#1e3a8a,#7c3aed)`,border:"none",borderRadius:18,padding:"16px 20px",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:14,marginBottom:12,boxShadow:`0 8px 24px rgba(124,58,237,0.25)`}}>
           <div style={{fontSize:30}}>📊</div>
@@ -5068,7 +5480,7 @@ function HomeScreen({firstName, profile, hasProgram, onProgram, onSeance, onPrep
 // ─── SYNC SERVEUR (multi-appareils) ───────────────────────────────────────────
 // Clés durables synchronisées. Exclues volontairement : coach_session_inprogress,
 // coach_today_adjust, coach_program_session (transitoires) et coach_progress_photos (trop lourd).
-const SYNC_KEYS = ["coach_sessions","coach_water","coach_nutrition_journal","coach_readiness","coach_weight_log","coach_bilans","coach_recipes","exercise_weights"];
+const SYNC_KEYS = ["coach_sessions","coach_water","coach_nutrition_journal","coach_readiness","coach_weight_log","coach_bilans","coach_recipes","exercise_weights","coach_program"];
 
 const _sessionKey = (s) => s && (s.id != null ? "id:" + s.id : [s.date, s.titre, s.sport, s.duree, s.status].join("|"));
 function _mergeSessions(local, srv) {
@@ -5124,6 +5536,11 @@ function mergeState(key, local, srv) {
     case "coach_recipes": return _mergeRecipes(local, srv);
     case "coach_readiness":
     case "exercise_weights": return _mergePreferLocal(local, srv);
+    case "coach_program": { // un seul tenant : la version la plus récente gagne
+      const t = v => (v && !Array.isArray(v) && v.at) ? new Date(v.at).getTime() : 0;
+      if (local == null) return srv; if (srv == null) return local;
+      return t(srv) > t(local) ? srv : local;
+    }
     default: return local != null ? local : srv;
   }
 }
@@ -5174,7 +5591,6 @@ export default function App() {
   const [msgs,setMsgs]=useState([]);
   const [input,setInput]=useState("");
   const [busy,setBusy]=useState(false);
-  const [week,setWeek]=useState(1);
   const [showEquip,setShowEquip]=useState(false);
   const [todayTime,setTodayTime]=useState(null);
   const [todayEquip,setTodayEquip]=useState(null);
@@ -5188,6 +5604,8 @@ export default function App() {
   const [dashboardParsed,setDashboardParsed]=useState(null);
   const [showSeance,setShowSeance]=useState(false);
   const [showFreeSession,setShowFreeSession]=useState(false);
+  const [showRecords,setShowRecords]=useState(false);
+  const [showCalendar,setShowCalendar]=useState(false);
   const [initialSport,setInitialSport]=useState(null);
   const [showPrep,setShowPrep]=useState(false);
   const [showWeight,setShowWeight]=useState(false);
@@ -5284,9 +5702,16 @@ export default function App() {
         if(data.chatHistory?.length>0){
           const restored=data.chatHistory.map(m=>({...m,parsed:m.role==="assistant"?parse(m.content):null}));
           setMsgs(restored);
-          // Restaurer dashboardParsed depuis le dernier message parsé avec cals
-          const lastProg = [...restored].reverse().find(m=>m.parsed&&m.parsed.cals);
-          if(lastProg?.parsed) setDashboardParsed(lastProg.parsed);
+          // Programme actif = dernier programme COMPLET. Une réponse d'adaptation ou de chat
+          // (moins de séances, ou suite à un "Ajustement ponctuel") ne remplace pas le programme.
+          let prog=null;
+          restored.forEach((m,i)=>{
+            if(m.role!=="assistant"||!isFullProgram(m.parsed)) return;
+            const prev=restored[i-1]; const q=(prev&&prev.role==="user"&&prev.content)||"";
+            if(/^Ajustement ponctuel/.test(q)) return;
+            if(/^Génère mon programme complet/.test(q)||!prog||m.parsed.sessions.length>=prog.sessions.length) prog=m.parsed;
+          });
+          if(prog) setDashboardParsed(prog);
         }
         // Always show home screen first
         setScreen("chat");
@@ -5326,7 +5751,7 @@ export default function App() {
     setMsgs([{role:"user",content:userMsg},{role:"assistant",content:"",loading:true}]);
     setBusy(true);
     try {
-      const r=await apiFetch("/api/coach",{method:"POST",body:JSON.stringify({system:makePrompt(p,user?.first_name||""),messages:[{role:"user",content:userMsg}],max_tokens:1500})},token);
+      const r=await apiFetch("/api/coach",{method:"POST",body:JSON.stringify({system:makePrompt(p,user?.first_name||""),messages:[{role:"user",content:userMsg}],max_tokens:4000})},token);
       const reply=r.content?.[0]?.text||"";
       const newMsgs=[{role:"user",content:userMsg},{role:"assistant",content:reply,parsed:parse(reply)}];
       setMsgs(newMsgs);
@@ -5334,40 +5759,55 @@ export default function App() {
       await apiFetch("/api/program",{method:"POST",body:JSON.stringify({content:reply})},token).catch(()=>{});
       // Show dashboard after generation
       const p = parse(reply);
-      if(p&&p.isParsed){setDashboardParsed(p);setShowDashboard(true);}
+      if(p&&p.isParsed){seedProgram(p);setDashboardParsed(p);setShowDashboard(true);}
     } catch(e){
       setMsgs(prev=>[...prev.slice(0,-1),{role:"assistant",content:`Erreur : ${e.message}`}]);
     }
     setBusy(false);
   };
 
-  const buildApiMsgs=(newMsg)=>{
-    const clean=msgs.filter(m=>!m.loading&&m.content?.trim()&&m.role).map(m=>({role:m.role,content:m.content}));
-    const alt=[];
+  const buildApiMsgs=(newMsg,mode)=>{
+    const isChat=mode!=="program";
+    const clean=msgs.filter(m=>!m.loading&&m.content?.trim()&&m.role).map(m=>({
+      role:m.role,
+      // En chat, un programme balisé dans l'historique pousserait l'IA à répondre en balises :
+      // on le remplace par un repère court (le programme actif est résumé dans le prompt système).
+      content:(isChat&&m.role==="assistant"&&m.parsed?.isParsed)?"(Programme structuré envoyé précédemment — voir le résumé du programme actif.)":m.content
+    }));
+    let alt=[];
     for(const m of clean){if(!alt.length||alt[alt.length-1].role!==m.role)alt.push(m);}
     if(alt[alt.length-1]?.role==="user")alt[alt.length-1]={role:"user",content:newMsg};
     else alt.push({role:"user",content:newMsg});
+    if(isChat&&alt.length>12){ alt=alt.slice(-12); if(alt[0].role!=="user") alt=alt.slice(1); }
     return alt;
   };
 
-  const send=async(userText)=>{
-    const apiMsgs=buildApiMsgs(userText);
+  // mode "program" : génération / évolution du programme (prompt balisé, peut remplacer
+  // le programme actif). mode "chat" (défaut) : réponse libre, ne touche jamais au programme.
+  const send=async(userText,mode)=>{
+    const m0=mode||(/^Génère mon programme complet/.test(userText)?"program":"chat");
+    const isProg=m0==="program";
+    const apiMsgs=buildApiMsgs(userText,m0);
     setMsgs(prev=>[...prev.filter(m=>!m.loading),{role:"user",content:userText},{role:"assistant",content:"",loading:true}]);
     setBusy(true); setInput("");
     try {
-      const r=await apiFetch("/api/coach",{method:"POST",body:JSON.stringify({system:makePrompt(profile,user?.first_name||""),messages:apiMsgs,max_tokens:1500})},token);
+      const r=await apiFetch("/api/coach",{method:"POST",body:JSON.stringify({system:isProg?makePrompt(profile,user?.first_name||""):makeChatPrompt(profile,user?.first_name||"",dashboardParsed?{...dashboardParsed,sessions:activeProgramSessions(dashboardParsed).filter(x=>x&&(x.exs||[]).length>0)}:null),messages:apiMsgs,max_tokens:isProg?4000:1500})},token);
       const reply=r.content?.[0]?.text||"";
       setMsgs(prev=>{
         const newMsgs=[...prev.slice(0,-1),{role:"assistant",content:reply,parsed:parse(reply)}];
         apiFetch("/api/chat",{method:"POST",body:JSON.stringify({messages:newMsgs.filter(m=>!m.loading).map(m=>({role:m.role,content:m.content}))})},token).catch(()=>{});
-        // Auto-show dashboard if this is a program
-        const p = parse(reply);
-        if(p&&p.isParsed){
-          setDashboardParsed(p);
-          setShowDashboard(true);
-        }
         return newMsgs;
       });
+      // Ne remplace le programme actif QUE par un programme complet (pas par une
+      // adaptation ponctuelle ni une réponse de chat qui reprend le format balisé).
+      const p = parse(reply);
+      const regen = /^Génère mon programme complet/.test(userText);
+      const adjust = /^Ajustement ponctuel/.test(userText);
+      if(isProg && isFullProgram(p) && !adjust && (regen || !dashboardParsed || p.sessions.length>=dashboardParsed.sessions.length)){
+        seedProgram(p);
+        setDashboardParsed(p);
+        setShowDashboard(true);
+      }
     } catch(e){
       setMsgs(prev=>[...prev.slice(0,-1),{role:"assistant",content:`Erreur : ${e.message}`}]);
     }
@@ -5383,6 +5823,7 @@ export default function App() {
     await apiFetch("/api/logs",{method:"POST",body:JSON.stringify({date:today,exercise_name:exName,sets_done:sets.filter(Boolean).length,sets_total:sets.length,weights,session_type:(sessEx && sessEx.session_type)||""})},token).catch(()=>{});
   },[logData,msgs,token]);
 
+  const week = programWeekFromMsgs(msgs);
   const rawName = user?.first_name||"";
   const firstName = rawName ? rawName.charAt(0).toUpperCase() + rawName.slice(1).toLowerCase() : "";
 
@@ -5397,6 +5838,7 @@ export default function App() {
         logData={logData}
         onLogSet={handleLogSet}
         onBack={()=>setShowDashboard(false)}
+        programWeek={week}
         onLaunchSeance={()=>{setInitialSport(null);setShowDashboard(false);setShowSeance(true);}}
       />
     </ErrorBoundary>
@@ -5427,6 +5869,8 @@ export default function App() {
       {showJournal&&<Journal token={token} onClose={()=>setShowJournal(false)}/>}
       {showSeance&&<ErrorBoundary title="La séance a rencontré un souci" onExit={()=>setShowSeance(false)}><SeancePanel token={token} profile={profile} firstName={firstName} initialSport={initialSport} onClose={()=>setShowSeance(false)} sendToChat={send}/></ErrorBoundary>}
       {showFreeSession&&<FreeSessionPanel profile={profile} onClose={()=>setShowFreeSession(false)} onSaved={()=>setStreakCount(sessionStreakCount())}/>}
+      {showRecords&&<RecordsPanel onClose={()=>setShowRecords(false)}/>}
+      {showCalendar&&<WeekCalendarPanel onClose={()=>setShowCalendar(false)}/>}
       {showHIIT&&<HIITPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowHIIT(false)}/>}
       {showWeight&&<BodyWeightTracker onClose={()=>setShowWeight(false)}/>}
       {showPrep&&<PrepPanel token={token} profile={profile} firstName={firstName} onClose={()=>setShowPrep(false)}/>}
@@ -5446,6 +5890,7 @@ export default function App() {
               profile={profile}
               hasProgram={msgs.length>0}
               onProgram={()=>{
+                if(dashboardParsed){ setShowDashboard(true); return; }
                 if(msgs.length>0){
                   // Find the last parsed program
                   const lastProg = [...msgs].reverse().find(m=>m.parsed&&m.parsed.isParsed);
@@ -5469,7 +5914,7 @@ export default function App() {
                 setHomeScreen(false);
                 const g=profile.gender==="homme"?"Homme":profile.gender==="femme"?"Femme":"";
                 const userMsg=`Génère mon programme complet. ${g?g+", ":""}${profile.age} ans, ${profile.weight}kg, ${profile.height}cm. Objectif : ${profile.goal}. Niveau : ${profile.level}. ${profile.days} jours/semaine. Équipement : ${profile.equip}.${profile.limits?" Limitations : "+profile.limits+".":""}${profile.cardio?" Cardio : "+profile.cardio+".":""}`;
-                send(userMsg);
+                send(userMsg,"program");
               }}
               onSeance={(sport)=>{setInitialSport(sport||null);setShowSeance(true);}}
               onPrep={()=>setShowPrep(true)}
@@ -5477,6 +5922,8 @@ export default function App() {
               onNutrition={()=>openNutrition()}
               onWater={()=>openNutrition("journal")}
               onFreeSession={()=>setShowFreeSession(true)}
+              onRecords={()=>setShowRecords(true)}
+              onCalendar={()=>setShowCalendar(true)}
               onProfil={()=>setScreen("form")}
               onWeight={()=>setShowWeight(true)}
               onMuscles={()=>setShowMuscles(true)}
@@ -5508,7 +5955,7 @@ export default function App() {
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:100,display:"flex",alignItems:"flex-end"}} onClick={()=>setShowEquip(false)}>
           <div style={{width:"100%",maxWidth:680,margin:"0 auto",background:C.surfHigh,borderRadius:"17px 17px 0 0",padding:"20px 15px 28px",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
             <div style={{fontSize:15,fontWeight:800,color:C.t1,marginBottom:3}}>Adapter la séance du jour</div>
-            <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.45}}>Moins de temps ou pas le bon matériel aujourd'hui ? Le coach adapte la séance du jour et rééquilibre les suivantes, sans changer ton objectif.</div>
+            <div style={{fontSize:12,color:C.t3,marginBottom:16,lineHeight:1.45}}>{dashboardParsed?.sessions?.length?"Moins de temps ou pas le bon matériel ? Le coach adapte ta prochaine séance du programme et la lance en mode guidé. La rotation continue normalement ensuite.":"Moins de temps ou pas le bon matériel aujourd'hui ? Le coach adapte la séance du jour et rééquilibre les suivantes, sans changer ton objectif."}</div>
 
             <div style={{fontSize:12,fontWeight:700,color:C.t2,marginBottom:8}}>⏱ Temps dispo aujourd'hui</div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
@@ -5536,6 +5983,13 @@ export default function App() {
               if(todayEquip) parts.push(`je n'ai accès qu'à : ${todayEquip}`);
               setEquipOverride(todayEquip);
               try{localStorage.setItem("coach_today_adjust",JSON.stringify({date:new Date().toISOString().split("T")[0],time:todayTime,equip:todayEquip}));}catch{}
+              // Programme existant : on adapte la PROCHAINE séance de la rotation et on la
+              // lance en mode guidé. Le programme n'est pas réécrit, la rotation continue.
+              const progSess=activeProgramSessions(dashboardParsed).filter(x=>x&&(x.exs||[]).length>0);
+              if(progSess&&progSess.length&&queueProgramSession(progSess,nextProgramSessionIndex(progSess))){
+                setInitialSport(null); setShowSeance(true);
+                return;
+              }
               const cons=parts.length?parts.join(" et "):"des conditions inhabituelles aujourd'hui";
               setHomeScreen(false);
               send(`Ajustement ponctuel pour aujourd'hui uniquement : ${cons}. 1) Donne-moi ma séance du jour adaptée précisément à ces contraintes. 2) Rééquilibre mes prochaines séances de la semaine pour rester aligné avec mon objectif global (${profile.goal}). C'est un ajustement temporaire : ne modifie pas la structure d'ensemble du programme.`);
@@ -5553,7 +6007,7 @@ export default function App() {
             <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8}}>
               {[
                 {label:equipOverride?"🔧 Équipement modifié":"🔧 Changer équipement",fn:()=>setShowEquip(true),hi:!!equipOverride},
-                {label:`📈 Évoluer sem. ${week+1}`,fn:()=>{setWeek(w=>w+1);send(`Semaine ${week+1}. Fais évoluer progressivement : charges, volume, variantes.`);}},
+                {label:`📈 Évoluer sem. ${week+1}`,fn:()=>{send(`Semaine ${week+1}. Fais évoluer progressivement mon programme : charges, volume, variantes. Garde le même nombre de séances et les mêmes noms de séances.`,"program");}},
                 {label:"🔀 Variantes +/- difficiles",fn:()=>send("Pour chaque exercice, donne 2 variantes : une plus facile et une plus difficile.")},
                 {label:"📋 Journal",fn:()=>setShowJournal(true)},
               {label:"🥗 Nutrition",fn:()=>openNutrition()},
