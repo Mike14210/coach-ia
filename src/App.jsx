@@ -1129,11 +1129,17 @@ function activeProgramSessions(parsed) {
 }
 // Stocké horodaté : la synchro garde la version la plus RÉCENTE (pas "serveur prime"),
 // sinon un pull juste après une génération pourrait réimposer l'ancien programme.
-function saveProgram(list) {
-  try { localStorage.setItem("coach_program", JSON.stringify({ at: new Date().toISOString(), sessions: serializeProgram(list) })); } catch {}
+// equip : matériel pour lequel le programme a été généré. Non fourni (éditions
+// manuelles) → on conserve celui déjà enregistré.
+function programEquip() {
+  try { const raw = JSON.parse(localStorage.getItem("coach_program") || "null"); return (raw && !Array.isArray(raw) && raw.equip) || null; } catch { return null; }
 }
-function seedProgram(p) {
-  if (p && Array.isArray(p.sessions) && p.sessions.length) saveProgram(p.sessions);
+function saveProgram(list, equip) {
+  const eq = equip !== undefined ? equip : programEquip();
+  try { localStorage.setItem("coach_program", JSON.stringify({ at: new Date().toISOString(), equip: eq || null, sessions: serializeProgram(list) })); } catch {}
+}
+function seedProgram(p, equip) {
+  if (p && Array.isArray(p.sessions) && p.sessions.length) saveProgram(p.sessions, equip || null);
 }
 // Met une séance du programme en file pour le runner, avec son index dans le programme.
 function queueProgramSession(sessions, i) {
@@ -1278,9 +1284,26 @@ function Bubble({msg,profile,firstName,logData,onLogSet}) {
 }
 
 
+// Garde l'écran allumé pendant une séance : la voix ne fonctionne que si l'appli
+// reste au premier plan (limite des navigateurs mobiles, surtout iOS).
+// La musique/podcast d'une autre appli continue en fond.
+function useWakeLock(active) {
+  useEffect(() => {
+    if (!active || !("wakeLock" in navigator)) return;
+    let lock = null, alive = true;
+    const req = async () => { try { if (alive && document.visibilityState === "visible") lock = await navigator.wakeLock.request("screen"); } catch {} };
+    const onVis = () => { if (document.visibilityState === "visible") req(); };
+    req();
+    document.addEventListener("visibilitychange", onVis);
+    return () => { alive = false; document.removeEventListener("visibilitychange", onVis); try { lock && lock.release(); } catch {} };
+  }, [active]);
+}
+
 // ─── HIIT WOD (Freeletics-style) ─────────────────────────────────────────────
 function speak(text) {
   if (!window.speechSynthesis) return;
+  // Safari 16.4+ : "transient" baisse la musique/podcast pendant l'annonce au lieu de la couper.
+  try { if (navigator.audioSession && navigator.audioSession.type !== "transient") navigator.audioSession.type = "transient"; } catch {}
   window.speechSynthesis.cancel();
   const utt = new SpeechSynthesisUtterance(text);
   utt.lang = "fr-FR"; utt.rate = 0.95; utt.pitch = 1.0; utt.volume = 1.0;
@@ -1365,6 +1388,7 @@ function HIITPanel({token, profile, firstName, onClose}) {
   const [running, setRunning] = useState(false);
   const timerRef = useRef(null);
   const [rating, setRating] = useState(null);
+  useWakeLock(running);
 
   const focusOpts = [
     {id:"Corps entier",icon:"🌟",sub:"Full body explosif"},
@@ -1568,14 +1592,47 @@ function HIITPanel({token, profile, firstName, onClose}) {
 }
 
 // ─── SÉANCE DU JOUR ───────────────────────────────────────────────────────────
-function SeanceExCard({ex, idx, accent, onSaveWeight, savedWeight, onLogSet}) {
+// Dernière performance enregistrée sur cet exercice (hors séance du jour) :
+// { date, sets:[{reps, weight}] } ou null. Lit coach_sessions (toutes disciplines).
+function getLastPerf(name) {
+  if (!name) return null;
+  const key = String(name).toLowerCase().trim();
+  const today = new Date().toDateString();
+  try {
+    const sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]")
+      .filter(s => s && s.date && new Date(s.date).toDateString() !== today)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    for (const s of sessions) {
+      const ex = (s.exercises || []).find(e => e && String(e.name || "").toLowerCase().trim() === key);
+      if (!ex || !Array.isArray(ex.sets)) continue;
+      const done = ex.sets.filter(x => x && x.done);
+      const sets = (done.length ? done : ex.sets).filter(x => x && (x.reps || x.weight)).map(x => ({ reps: String(x.reps || ""), weight: String(x.weight || "") }));
+      if (sets.length) return { date: s.date, sets };
+    }
+  } catch {}
+  return null;
+}
+function fmtPerf(p) {
+  return p.sets.map(x => `${x.reps || "?"}${x.weight ? "×" + String(x.weight).replace(".", ",") + "kg" : ""}`).join(" · ");
+}
+function spokenPerf(p) {
+  const same = p.sets.every(x => x.reps === p.sets[0].reps && x.weight === p.sets[0].weight);
+  const one = x => `${x.reps} répétitions${x.weight ? " à " + String(x.weight).replace(".", ",") + " kilos" : ""}`;
+  return same ? `La dernière fois : ${p.sets.length} séries de ${one(p.sets[0])}.` : `La dernière fois : ${p.sets.map(one).join(", puis ")}.`;
+}
+
+function SeanceExCard({ex, idx, accent, onSaveWeight, savedWeight, onLogSet, lastPerf}) {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
   const totalSets = parseInt(String(ex.sets))||3;
   const restSecs = parseInt(String(ex.rest))||60;
   const defaultReps = String(ex.reps||"").split("-")[0]||"10";
   const [sets, setSets] = useState(Array(totalSets).fill(false));
-  const [weights, setWeights] = useState(Array(totalSets).fill(savedWeight||""));
+  const [weights, setWeights] = useState(Array.from({length:totalSets},(_,j)=>{
+    const lp = lastPerf && lastPerf.sets.length ? (lastPerf.sets[j] || lastPerf.sets[lastPerf.sets.length-1]).weight : "";
+    return lp || savedWeight || "";
+  }));
+  const announced = useRef(false);
   const [repsArr, setRepsArr] = useState(Array(totalSets).fill(defaultReps));
   const [showRest, setShowRest] = useState(false);
 
@@ -1608,11 +1665,15 @@ function SeanceExCard({ex, idx, accent, onSaveWeight, savedWeight, onLogSet}) {
 
   return (
     <div style={{background:done?accent+"22":"rgba(255,255,255,0.08)",border:`1.5px solid ${done?accent:open?accent+"66":"rgba(255,255,255,0.2)"}`,borderRadius:12,marginBottom:10}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:"pointer"}} onClick={()=>{
+        if (!open && lastPerf && !announced.current && !sets.some(Boolean)) { announced.current = true; speak(spokenPerf(lastPerf)); }
+        setOpen(o=>!o);
+      }}>
         <div style={{width:30,height:30,borderRadius:"50%",background:done?accent:accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13,color:done?"#fff":accent,flexShrink:0}}>{done?"✓":idx+1}</div>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:14,color:"#f9fafb"}}>{ex.name}</div>
-          <div style={{fontSize:11,color:"#9ca3af"}}>{ex.sets} × {ex.reps} · {ex.rest}{savedWeight?` · ${savedWeight}kg`:""}</div>
+          <div style={{fontSize:11,color:"#9ca3af"}}>{ex.sets} × {ex.reps} · {ex.rest}{!lastPerf&&savedWeight?` · ${savedWeight}kg`:""}</div>
+          {lastPerf&&<div style={{fontSize:11,color:"#fbbf24",marginTop:2,fontWeight:600}}>⏮ {new Date(lastPerf.date).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit"})} : {fmtPerf(lastPerf)}</div>}
         </div>
         <span style={{fontSize:11,color:accent,fontWeight:700}}>{sets.filter(Boolean).length}/{totalSets}</span>
       </div>
@@ -1657,6 +1718,7 @@ function SeanceExCard({ex, idx, accent, onSaveWeight, savedWeight, onLogSet}) {
 
 function SeancePanel({token, profile, firstName, onClose, sendToChat, initialSport}) {
   const [screen, setScreen] = useState(initialSport?"config":"sport"); // sport | config | loading | seance | resume
+  useWakeLock(screen === "seance");
   const [sport, setSport] = useState(initialSport||null);
   const [muscles, setMuscles] = useState([]);
   const [seanceType, setSeanceType] = useState("");
@@ -1821,12 +1883,18 @@ CONSIGNE : Remplace les exercices NON ENCORE FAITS par des alternatives adaptée
               }));
             } catch {}
           };
-          // Matériel différent de l'habituel : on remplace réellement les exercices non faisables.
-          if (adj?.equip && adj.equip !== profile?.equip) {
+          // Matériel effectif (ajustement du jour, sinon profil) comparé au matériel pour
+          // lequel le programme a été généré. Programme ancien sans matériel enregistré :
+          // on adapte dès que le matériel n'est pas une salle complète (l'IA garde tel quel
+          // ce qui est faisable, donc sans effet si tout l'est).
+          const effEquip = adj?.equip || profile?.equip || "Poids du corps";
+          const progEq = programEquip();
+          const mustAdapt = progEq ? progEq !== effEquip : effEquip !== "Salle complète";
+          if (mustAdapt) {
             setScreen("loading");
-            adaptMainToEquip(sd0.main, adj.equip, token, profile?.level)
-              .then(main => startProgram({ ...sd0, main, conseil: `Exercices adaptés à ton matériel du jour : ${adj.equip}.` }))
-              .catch(() => startProgram({ ...sd0, conseil: `Adaptation automatique indisponible : si un exercice demande du matériel absent, remplace-le par un équivalent (${adj.equip}).` }));
+            adaptMainToEquip(sd0.main, effEquip, token, profile?.level)
+              .then(main => startProgram({ ...sd0, main, conseil: `Exercices adaptés à ton matériel : ${effEquip}.` }))
+              .catch(() => startProgram({ ...sd0, conseil: `Adaptation automatique indisponible : si un exercice demande du matériel absent, remplace-le par un équivalent (${effEquip}).` }));
           } else {
             startProgram(sd0);
           }
@@ -2635,9 +2703,9 @@ Réponds UNIQUEMENT avec ce format JSON, sans texte autour :
                   <div>
                     {/* Active exercise - first uncompleted */}
                     {seanceData.main.map((ex,i)=>{
-                      console.log("Rendering ex:", i, ex.name, ex.sets, ex.reps);
                       return <SeanceExCard key={i} ex={ex} idx={i} accent={C.indigo}
                         savedWeight={getWeight(ex.name)}
+                        lastPerf={getLastPerf(ex.name)}
                         onSaveWeight={saveWeight}
                         onLogSet={handleLogSet}/>;
                     })}
@@ -5743,6 +5811,7 @@ export default function App() {
   const handleLogout=()=>{store.del("token");store.del("user");setToken(null);setUser(null);setProfile(null);setMsgs([]);setScreen("auth");};
 
   const handleProfileDone=async(p)=>{
+    const profEquip=p.equip;
     setProfile(p);
     await apiFetch("/api/profile",{method:"PUT",body:JSON.stringify(p)},token).catch(()=>{});
     setScreen("chat");
@@ -5759,7 +5828,7 @@ export default function App() {
       await apiFetch("/api/program",{method:"POST",body:JSON.stringify({content:reply})},token).catch(()=>{});
       // Show dashboard after generation
       const p = parse(reply);
-      if(p&&p.isParsed){seedProgram(p);setDashboardParsed(p);setShowDashboard(true);}
+      if(p&&p.isParsed){seedProgram(p,profEquip);setDashboardParsed(p);setShowDashboard(true);}
     } catch(e){
       setMsgs(prev=>[...prev.slice(0,-1),{role:"assistant",content:`Erreur : ${e.message}`}]);
     }
@@ -5804,7 +5873,7 @@ export default function App() {
       const regen = /^Génère mon programme complet/.test(userText);
       const adjust = /^Ajustement ponctuel/.test(userText);
       if(isProg && isFullProgram(p) && !adjust && (regen || !dashboardParsed || p.sessions.length>=dashboardParsed.sessions.length)){
-        seedProgram(p);
+        seedProgram(p,profile?.equip);
         setDashboardParsed(p);
         setShowDashboard(true);
       }
