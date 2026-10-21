@@ -1594,19 +1594,26 @@ function HIITPanel({token, profile, firstName, onClose}) {
 // ─── SÉANCE DU JOUR ───────────────────────────────────────────────────────────
 // Dernière performance enregistrée sur cet exercice (hors séance du jour) :
 // { date, sets:[{reps, weight}] } ou null. Lit coach_sessions (toutes disciplines).
+const EX_STOP = new Set(["de","du","des","la","le","les","l","d","a","au","aux","avec","en","sur","et","un","une"]);
+function normExName(name) {
+  return String(name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && !EX_STOP.has(w))
+    .map(w => (w.length > 3 && w.endsWith("s")) ? w.slice(0, -1) : w).join(" ");
+}
 function getLastPerf(name) {
   if (!name) return null;
-  const key = String(name).toLowerCase().trim();
+  const key = normExName(name);
+  if (!key) return null;
   const today = new Date().toDateString();
   try {
     const sessions = JSON.parse(localStorage.getItem("coach_sessions") || "[]")
       .filter(s => s && s.date && new Date(s.date).toDateString() !== today)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
     for (const s of sessions) {
-      const ex = (s.exercises || []).find(e => e && String(e.name || "").toLowerCase().trim() === key);
+      const ex = (s.exercises || []).find(e => e && normExName(e.name) === key);
       if (!ex || !Array.isArray(ex.sets)) continue;
-      const done = ex.sets.filter(x => x && x.done);
-      const sets = (done.length ? done : ex.sets).filter(x => x && (x.reps || x.weight)).map(x => ({ reps: String(x.reps || ""), weight: String(x.weight || "") }));
+      // Séries réellement validées uniquement (les autres gardent les valeurs pré-remplies).
+      const sets = ex.sets.filter(x => x && x.done).filter(x => x && (x.reps || x.weight)).map(x => ({ reps: String(x.reps || ""), weight: String(x.weight || "") }));
       if (sets.length) return { date: s.date, sets };
     }
   } catch {}
@@ -1645,12 +1652,12 @@ function SeanceExCard({ex, idx, accent, onSaveWeight, savedWeight, onLogSet, las
     const ns = sets.map((s,j) => j===i ? !s : s);
     setSets(ns);
     const done = ns.filter(Boolean).length;
+    if (onLogSet) onLogSet(ex.name, weights.map((w,j)=>({weight:w, reps:repsArr[j], done:ns[j]})));
     if (ns[i]) {
+      if (weights[i] && onSaveWeight) onSaveWeight(ex.name, weights[i]);
       if (ns.every(Boolean)) {
         setDone(true); setShowRest(false);
         speak("Exercice terminé ! Bien joué.");
-        if (weights[i] && onSaveWeight) onSaveWeight(ex.name, weights[i]);
-        if (onLogSet) onLogSet(ex.name, weights.map((w,j)=>({weight:w, reps:repsArr[j], done:ns[j]})));
       } else {
         setShowRest(true);
         speak(`Série ${done} terminée. Repos ${restSecs} secondes.`);
